@@ -28,11 +28,36 @@ type Device struct {
 }
 
 type Track struct {
+	URI     string `json:"uri"`
 	Name    string `json:"name"`
 	Artists []struct {
 		Name string `json:"name"`
 	} `json:"artists"`
 	DurationMS int `json:"duration_ms"`
+}
+
+func (c *Client) SearchTracks(ctx context.Context, query string) ([]Track, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("escribe una búsqueda")
+	}
+	values := url.Values{"q": {query}, "type": {"track"}, "limit": {"5"}}
+	var result struct {
+		Tracks struct {
+			Items []Track `json:"items"`
+		} `json:"tracks"`
+	}
+	_, err := c.request(ctx, http.MethodGet, "/search?"+values.Encode(), nil, &result)
+	return result.Tracks.Items, err
+}
+
+func (c *Client) PlayTrack(ctx context.Context, track Track, deviceID string) error {
+	if track.URI == "" || deviceID == "" {
+		return errors.New("falta una canción o el dispositivo local")
+	}
+	query := url.Values{"device_id": {deviceID}}
+	_, err := c.request(ctx, http.MethodPut, "/me/player/play?"+query.Encode(), map[string]any{"uris": []string{track.URI}}, nil)
+	return err
 }
 
 type PlaybackState struct {

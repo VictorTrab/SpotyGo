@@ -16,6 +16,20 @@ if ($goCommand) {
 $installDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'go\bin'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 $target = Join-Path $installDir 'spotygo.exe'
+$audioRoot = Join-Path $env:LOCALAPPDATA 'SpotyGo\librespot'
+$audioExe = Join-Path $audioRoot 'bin\librespot.exe'
+
+if (-not (Test-Path -LiteralPath $audioExe)) {
+    $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
+    if (-not $cargoCommand) {
+        throw 'Falta Rust/Cargo para instalar el motor de audio. Instala Rust desde https://rustup.rs/ y vuelve a ejecutar el instalador.'
+    }
+    Write-Host 'Instalando librespot 0.8.0 para reproducir audio en esta computadora. Puede tardar varios minutos...'
+    & $cargoCommand.Source install librespot --version 0.8.0 --locked --root $audioRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw 'No se pudo instalar librespot.'
+    }
+}
 
 Push-Location $projectDir
 try {

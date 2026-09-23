@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/VictorTrab/SpotyGo/internal/player"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
 	"github.com/VictorTrab/SpotyGo/internal/ui"
 )
@@ -40,7 +41,7 @@ func run(args []string) error {
 			}
 		case "help", "-h", "--help":
 			fmt.Println("Uso: spotygo [login [--client-id ID]]")
-			fmt.Println("  spotygo        Abre el controlador remoto")
+			fmt.Println("  spotygo        Reproduce música en esta computadora")
 			fmt.Println("  spotygo login  Inicia o comprueba la sesión de Spotify")
 			return nil
 		default:
@@ -67,7 +68,12 @@ func run(args []string) error {
 		fmt.Println("Sesión de Spotify activa. Ejecuta spotygo para abrir la interfaz.")
 		return nil
 	}
-	program := tea.NewProgram(ui.New(spotify.NewClient(auth)))
+	engine, err := player.Start()
+	if err != nil {
+		return err
+	}
+	defer engine.Stop()
+	program := tea.NewProgram(ui.New(spotify.NewClient(auth), engine.Name, engine.Done))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("interfaz: %w", err)
 	}
