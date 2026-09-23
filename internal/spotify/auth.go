@@ -180,6 +180,7 @@ func (a *Auth) authorize(ctx context.Context) error {
 		err  error
 	}
 	callback := make(chan callbackResult, 1)
+	var callbackOnce sync.Once
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(state)) != 1 {
@@ -192,12 +193,15 @@ func (a *Auth) authorize(ctx context.Context) error {
 		} else if result.code == "" {
 			result.err = errors.New("Spotify no devolvió un código de autorización")
 		}
-		select {
-		case callback <- result:
-			fmt.Fprint(w, "SpotyGo recibió la autorización. Puedes cerrar esta pestaña.")
-		default:
+		accepted := false
+		callbackOnce.Do(func() { accepted = true })
+		if !accepted {
 			http.Error(w, "Autorización ya recibida", http.StatusConflict)
+			return
 		}
+		fmt.Fprint(w, "SpotyGo recibió la autorización. Puedes cerrar esta pestaña.")
+		_ = http.NewResponseController(w).Flush()
+		callback <- result
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go server.Serve(listener)
