@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
@@ -14,6 +16,7 @@ import (
 type stateMsg struct {
 	state spotify.PlaybackState
 	err   error
+	epoch int
 }
 
 type devicesMsg struct {
@@ -22,13 +25,15 @@ type devicesMsg struct {
 }
 
 type actionMsg struct {
-	name string
-	seq  int
-	err  error
+	name  string
+	seq   int
+	err   error
+	value int
 }
 
 type volumeDueMsg struct{ seq int }
 type pollMsg struct{}
+type refreshDueMsg struct{ devices bool }
 type engineStoppedMsg struct{ err error }
 type searchMsg struct {
 	tracks []spotify.Track
@@ -56,16 +61,34 @@ type Model struct {
 	width          int
 	volumeOverride *int
 	volumeSeq      int
+	volumeExpected *int
+	volumeDeviceID string
+	volumeSetAt    time.Time
+	stateEpoch     int
+	lastTransport  time.Time
+	lastSync       time.Time
+	statusError    bool
+	pendingDevice  string
+	desiredPlaying *bool
+	desiredSince   time.Time
+	spinner        spinner.Model
+	progress       progress.Model
 }
 
 func New(client *spotify.Client, localName string, engineDone <-chan error) Model {
-	return Model{client: client, localName: localName, engineDone: engineDone, width: 68, status: "Iniciando audio en esta computadora…"}
+	pulse := spinner.New(spinner.WithSpinner(spinner.Spinner{
+		Frames: []string{"[| . . .]", "[| | . .]", "[| | | .]", "[| | | |]", "[| | | .]", "[| | . .]"},
+		FPS:    180 * time.Millisecond,
+	}))
+	bar := progress.New(progress.WithWidth(34), progress.WithoutPercentage(), progress.WithColors(lipgloss.Color("#1DB954"), lipgloss.Color("#5EEAD4")), progress.WithFillCharacters('=', '-'))
+	return Model{client: client, localName: localName, engineDone: engineDone, width: 68, status: "Iniciando audio en esta computadora…", spinner: pulse, progress: bar}
 }
 
 func (m Model) fetchState() tea.Cmd {
+	epoch := m.stateEpoch
 	return func() tea.Msg {
 		state, err := m.client.Playback(context.Background())
-		return stateMsg{state, err}
+		return stateMsg{state, err, epoch}
 	}
 }
 
@@ -81,7 +104,7 @@ func poll() tea.Cmd {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.fetchState(), m.fetchDevices(), poll(), func() tea.Msg {
+	return tea.Batch(m.fetchState(), m.fetchDevices(), poll(), m.spinner.Tick, func() tea.Msg {
 		return engineStoppedMsg{err: <-m.engineDone}
 	})
 }
@@ -101,13 +124,19 @@ func (m Model) localDevice() (spotify.Device, bool) {
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case searchMsg:
 		if msg.seq != m.searchSeq || !m.searching {
 			break
 		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
+			m.statusError = true
 		} else {
+			m.statusError = false
 			m.searchResults = msg.tracks
 			m.searchSelected = 0
 			if len(msg.tracks) == 0 {
@@ -119,20 +148,59 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case engineStoppedMsg:
 		m.localReady = false
 		m.status = fmt.Sprintf("Motor de audio detenido: %v. Revisa el registro de librespot.", msg.err)
+		m.statusError = true
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.progress.SetWidth(max(12, min(40, msg.Width-38)))
 	case stateMsg:
+		if msg.epoch != m.stateEpoch || m.transportBusy {
+			break
+		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
+			m.statusError = true
 		} else {
 			m.state = msg.state
-			if m.status == "Conectando con Spotify…" {
-				m.status = "Listo"
+			m.lastSync = time.Now()
+			if m.desiredPlaying != nil {
+				if m.state.IsPlaying == *m.desiredPlaying {
+					if m.state.IsPlaying {
+						m.status = "Reproduciendo"
+					} else {
+						m.status = "Pausado"
+					}
+					m.statusError = false
+					m.desiredPlaying = nil
+				} else if time.Since(m.desiredSince) < 8*time.Second {
+					m.state.IsPlaying = *m.desiredPlaying
+				} else {
+					m.desiredPlaying = nil
+					m.status = "Spotify no confirmó el cambio de reproducción"
+					m.statusError = true
+				}
+			}
+			if m.volumeExpected != nil && m.state.Device != nil && m.state.Device.ID == m.volumeDeviceID {
+				if m.state.Device.VolumePercent != nil && *m.state.Device.VolumePercent == *m.volumeExpected {
+					m.volumeExpected = nil
+				} else if time.Since(m.volumeSetAt) < 8*time.Second {
+					value := *m.volumeExpected
+					m.state.Device.VolumePercent = &value
+				} else {
+					m.volumeExpected = nil
+					m.status = "Spotify aún no confirma el volumen; mostrando el valor informado por el dispositivo"
+					m.statusError = true
+				}
+			}
+			if m.pendingDevice != "" && m.state.Device != nil && m.state.Device.Name == m.pendingDevice {
+				m.status = "Audio activo en " + m.pendingDevice
+				m.pendingDevice = ""
+				m.statusError = false
 			}
 		}
 	case devicesMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
+			m.statusError = true
 		} else {
 			m.devices = msg.devices
 			for _, device := range m.devices {
@@ -140,8 +208,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.localReady = true
 					if !m.transferSent && !device.IsActive {
 						m.transferSent = true
+						m.transportBusy = true
+						m.stateEpoch++
 						m.status = "Transfiriendo música a esta computadora…"
-						return m, m.act("transferir", func(ctx context.Context) error { return m.client.Transfer(ctx, device) })
+						m.statusError = false
+						m.pendingDevice = device.Name
+						return m, m.act("transferencia local", func(ctx context.Context) error { return m.client.Transfer(ctx, device) })
 					}
 					if !m.transferSent {
 						m.transferSent = true
@@ -155,21 +227,57 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case actionMsg:
+		if msg.name == "volumen" && msg.seq != m.volumeSeq {
+			return m, nil
+		}
 		if msg.name != "volumen" {
 			m.transportBusy = false
+			m.stateEpoch++
 		}
 		if msg.name == "volumen" && msg.seq == m.volumeSeq {
 			m.volumeOverride = nil
+			m.stateEpoch++
+			if msg.err == nil && m.state.Device != nil {
+				value := msg.value
+				m.state.Device.VolumePercent = &value
+				m.volumeExpected = &value
+				m.volumeDeviceID = m.state.Device.ID
+				m.volumeSetAt = time.Now()
+			}
 		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
-			if msg.name == "transferir" {
-				m.transferSent = false
+			m.statusError = true
+			if msg.name == "pausar" || msg.name == "reproducir" {
+				m.desiredPlaying = nil
+			}
+			if msg.name == "transferir" || msg.name == "transferencia local" {
+				m.pendingDevice = ""
 			}
 		} else {
-			m.status = "Acción completada: " + msg.name
+			m.statusError = false
+			switch msg.name {
+			case "volumen":
+				m.status = fmt.Sprintf("Volumen fijado en %d%%", msg.value)
+			case "transferir", "transferencia local":
+				m.status = "Dispositivo cambiado; sincronizando reproducción…"
+			case "pausar":
+				m.status = "Pausa enviada · confirmando con Spotify…"
+			case "reproducir", "canción":
+				m.status = "Reproducción enviada · confirmando con Spotify…"
+			default:
+				m.status = "Listo: " + msg.name
+			}
 		}
-		if msg.name == "transferir" {
+		if msg.name == "transferir" || msg.name == "transferencia local" {
+			return m, tea.Batch(m.fetchState(), m.fetchDevices(), tea.Tick(1200*time.Millisecond, func(time.Time) tea.Msg { return refreshDueMsg{devices: true} }))
+		}
+		if msg.name == "pausar" || msg.name == "reproducir" {
+			return m, tea.Batch(m.fetchState(), tea.Tick(1200*time.Millisecond, func(time.Time) tea.Msg { return refreshDueMsg{} }))
+		}
+		return m, m.fetchState()
+	case refreshDueMsg:
+		if msg.devices {
 			return m, tea.Batch(m.fetchState(), m.fetchDevices())
 		}
 		return m, m.fetchState()
@@ -181,7 +289,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		deviceID := m.state.Device.ID
 		return m, func() tea.Msg {
 			err := m.client.SetVolume(context.Background(), value, deviceID)
-			return actionMsg{name: "volumen", seq: msg.seq, err: err}
+			return actionMsg{name: "volumen", seq: msg.seq, err: err, value: value}
 		}
 	case pollMsg:
 		if !m.localReady {
@@ -190,6 +298,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchState(), poll())
 	case tea.KeyPressMsg:
 		key := msg.String()
+		repeated := msg.Key().IsRepeat
 		if key == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -217,12 +326,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					device, ok := m.localDevice()
 					if !ok {
 						m.status = "El dispositivo local aún no está listo"
+						m.statusError = true
 						return m, nil
 					}
 					track := m.searchResults[m.searchSelected]
 					m.searching = false
 					m.transportBusy = true
+					m.stateEpoch++
 					m.status = "Reproduciendo " + track.Name + " en esta computadora…"
+					m.statusError = false
 					return m, m.act("canción", func(ctx context.Context) error { return m.client.PlayTrack(ctx, track, device.ID) })
 				}
 				query := strings.TrimSpace(m.searchInput)
@@ -232,6 +344,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.searchInput = ""
 					m.searchResults = nil
 					m.status = "Buscando " + query + "…"
+					m.statusError = false
 					return m, func() tea.Msg {
 						tracks, err := m.client.SearchTracks(context.Background(), query)
 						return searchMsg{tracks: tracks, err: err, seq: seq}
@@ -264,9 +377,30 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if len(m.devices) > 0 {
 					device := m.devices[m.selected]
+					if repeated || m.transportBusy {
+						return m, nil
+					}
+					if device.IsRestricted || device.ID == "" {
+						m.status = device.Name + " no permite transferir la reproducción"
+						m.statusError = true
+						return m, nil
+					}
 					m.showDevices = false
+					if device.IsActive {
+						m.status = device.Name + " ya está activo"
+						return m, nil
+					}
+					m.transportBusy = true
+					m.stateEpoch++
 					m.status = "Transfiriendo a " + device.Name + "…"
-					return m, m.act("transferir", func(ctx context.Context) error { return m.client.Transfer(ctx, device) })
+					m.statusError = false
+					m.pendingDevice = device.Name
+					return m, m.act("transferir", func(ctx context.Context) error {
+						if err := m.client.Transfer(ctx, device); err != nil {
+							return fmt.Errorf("transferir a %s: %w", device.Name, err)
+						}
+						return nil
+					})
 				}
 			}
 			return m, nil
@@ -278,12 +412,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput = ""
 			m.searchResults = nil
 			m.status = "Escribe una canción o artista y pulsa Enter"
+			m.statusError = false
 			return m, nil
 		case "d":
 			m.showDevices = true
 			return m, m.fetchDevices()
 		case " ", "space":
-			if m.transportBusy {
+			if repeated || m.transportBusy || time.Since(m.lastTransport) < 450*time.Millisecond {
 				return m, nil
 			}
 			if !m.state.Available {
@@ -291,27 +426,46 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.transportBusy = true
+			m.lastTransport = time.Now()
+			m.stateEpoch++
 			if m.state.IsPlaying {
 				m.state.IsPlaying = false
+				value := false
+				m.desiredPlaying = &value
+				m.desiredSince = time.Now()
+				m.status = "Pausando…"
+				m.statusError = false
 				return m, m.act("pausar", m.client.Pause)
 			}
 			m.state.IsPlaying = true
+			value := true
+			m.desiredPlaying = &value
+			m.desiredSince = time.Now()
+			m.status = "Reproduciendo…"
+			m.statusError = false
 			return m, m.act("reproducir", m.client.Play)
 		case "n":
-			if m.transportBusy {
+			if repeated || m.transportBusy || time.Since(m.lastTransport) < 450*time.Millisecond {
 				return m, nil
 			}
 			m.transportBusy = true
+			m.lastTransport = time.Now()
+			m.stateEpoch++
+			m.status = "Saltando a la siguiente…"
 			return m, m.act("siguiente", m.client.Next)
 		case "p":
-			if m.transportBusy {
+			if repeated || m.transportBusy || time.Since(m.lastTransport) < 450*time.Millisecond {
 				return m, nil
 			}
 			m.transportBusy = true
+			m.lastTransport = time.Now()
+			m.stateEpoch++
+			m.status = "Volviendo a la anterior…"
 			return m, m.act("anterior", m.client.Previous)
 		case "+", "=", "-", "_":
 			if m.state.Device == nil || !m.state.Device.SupportsVolume || m.state.Device.VolumePercent == nil {
 				m.status = "El dispositivo actual no permite ajustar el volumen"
+				m.statusError = true
 				return m, nil
 			}
 			value := *m.state.Device.VolumePercent
@@ -335,19 +489,35 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	green := lipgloss.NewStyle().Foreground(lipgloss.Color("#1DB954")).Bold(true)
+	bright := lipgloss.NewStyle().Foreground(lipgloss.Color("#F5F7F7")).Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#8F9AA7"))
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("#5EEAD4")).Bold(true)
+	magenta := lipgloss.NewStyle().Foreground(lipgloss.Color("#EFA6E9")).Bold(true)
 	warning := lipgloss.NewStyle().Foreground(lipgloss.Color("#F5B841"))
-	boxWidth := max(34, min(80, m.width-4))
+	boxWidth := max(24, min(92, m.width-6))
 	box := lipgloss.NewStyle().Width(boxWidth).Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#1DB954"))
 
 	var lines []string
-	lines = append(lines, green.Render("♫ SpotyGo")+"  "+muted.Render("Audio en esta computadora"), "")
+	liveness := "○ CONECTANDO"
+	if !m.lastSync.IsZero() {
+		age := time.Since(m.lastSync).Round(time.Second)
+		if age < 20*time.Second {
+			liveness = "● EN LÍNEA · actualizado hace " + age.String()
+		} else {
+			liveness = "◌ SINCRONIZANDO · última respuesta hace " + age.String()
+		}
+	}
+	liveStyle := green
+	if m.lastSync.IsZero() || time.Since(m.lastSync) >= 20*time.Second {
+		liveStyle = warning
+	}
+	lines = append(lines, green.Render("♫  SPOTYGO")+"  "+cyan.Render("/  TU REPRODUCTOR LOCAL"), liveStyle.Render(liveness), "")
 	if !m.state.Available {
-		lines = append(lines, "No hay reproducción activa.", muted.Render("Esperando el reproductor local o una canción."))
+		lines = append(lines, bright.Render("Elige algo para escuchar"), muted.Render("Pulsa / para buscar una canción o un artista."))
 	} else {
-		icon := "Ⅱ"
+		icon := "Ⅱ [ . . . .]"
 		if m.state.IsPlaying {
-			icon = "▶"
+			icon = "▶ " + m.spinner.View()
 		}
 		track := "Sin canción"
 		artist := ""
@@ -359,9 +529,18 @@ func (m Model) View() tea.View {
 			}
 			artist = strings.Join(names, ", ")
 		}
-		lines = append(lines, green.Render(icon)+"  "+track, muted.Render(artist))
+		lines = append(lines, green.Render(icon)+"  "+bright.Render(track), cyan.Render("   "+artist))
 		if m.state.Item != nil {
-			lines = append(lines, muted.Render(fmt.Sprintf("%s / %s", duration(m.state.ProgressMS), duration(m.state.Item.DurationMS))))
+			position := m.state.ProgressMS
+			if m.state.IsPlaying && !m.lastSync.IsZero() {
+				position += int(time.Since(m.lastSync).Milliseconds())
+			}
+			position = min(position, m.state.Item.DurationMS)
+			fraction := 0.0
+			if m.state.Item.DurationMS > 0 {
+				fraction = float64(position) / float64(m.state.Item.DurationMS)
+			}
+			lines = append(lines, "", muted.Render(duration(position))+"  "+m.progress.ViewAs(fraction)+"  "+muted.Render(duration(m.state.Item.DurationMS)))
 		}
 		if m.state.Device != nil {
 			volume := "—"
@@ -371,15 +550,15 @@ func (m Model) View() tea.View {
 			if m.volumeOverride != nil {
 				volume = fmt.Sprintf("%d%%", *m.volumeOverride)
 			}
-			lines = append(lines, "", "Dispositivo: "+m.state.Device.Name+"  |  Volumen: "+volume)
+			lines = append(lines, "", muted.Render("SALIDA  ")+cyan.Render(m.state.Device.Name), muted.Render("VOLUMEN ")+magenta.Render(volume))
 		}
 	}
-	lines = append(lines, "")
+	lines = append(lines, "", green.Render(strings.Repeat("─", max(20, min(58, boxWidth-4)))), "")
 	if !m.localReady {
 		lines = append(lines, warning.Render("Iniciando el dispositivo local; autoriza Spotify en el navegador si se abre."), "")
 	}
 	if m.searching {
-		lines = append(lines, green.Render("Buscar: ")+m.searchInput+"▌")
+		lines = append(lines, cyan.Render("BUSCAR  ")+bright.Render(m.searchInput)+green.Render("▌"))
 		if len(m.searchResults) > 0 {
 			for i, track := range m.searchResults {
 				prefix := "  "
@@ -390,14 +569,19 @@ func (m Model) View() tea.View {
 				for _, artist := range track.Artists {
 					artists = append(artists, artist.Name)
 				}
-				lines = append(lines, prefix+track.Name+" — "+strings.Join(artists, ", "))
+				label := prefix + track.Name + " — " + strings.Join(artists, ", ")
+				if i == m.searchSelected {
+					lines = append(lines, cyan.Render(label))
+				} else {
+					lines = append(lines, muted.Render(label))
+				}
 			}
 			lines = append(lines, "", muted.Render("↑/↓ elegir · Enter reproducir · Esc cerrar"))
 		} else {
 			lines = append(lines, muted.Render("Enter buscar · Esc cerrar"))
 		}
 	} else if m.showDevices {
-		lines = append(lines, green.Render("Dispositivos"))
+		lines = append(lines, cyan.Render("DISPOSITIVOS"))
 		if len(m.devices) == 0 {
 			lines = append(lines, muted.Render("No hay dispositivos disponibles."))
 		}
@@ -413,15 +597,26 @@ func (m Model) View() tea.View {
 			if device.IsRestricted || device.ID == "" {
 				label += " • no controlable"
 			}
-			lines = append(lines, label)
+			if i == m.selected {
+				lines = append(lines, cyan.Render(label))
+			} else {
+				lines = append(lines, muted.Render(label))
+			}
 		}
 		lines = append(lines, "", muted.Render("j/k elegir · Enter transferir · Esc cerrar"))
 	} else {
-		lines = append(lines, muted.Render("Espacio play/pausa · n/p saltar · +/- volumen"))
-		lines = append(lines, muted.Render("/ buscar música · d dispositivos · q salir"))
+		lines = append(lines, green.Render("ESPACIO")+muted.Render(" play/pausa   ")+cyan.Render("N/P")+muted.Render(" saltar   ")+magenta.Render("+/-")+muted.Render(" volumen"))
+		lines = append(lines, cyan.Render("/")+muted.Render(" buscar música   ")+cyan.Render("D")+muted.Render(" dispositivos   ")+cyan.Render("Q")+muted.Render(" salir"))
 	}
-	lines = append(lines, "", warning.Render(m.status))
-	view := tea.NewView(box.Render(strings.Join(lines, "\n")))
+	feedback := green.Render("✓ " + m.status)
+	if m.statusError {
+		feedback = warning.Render("! " + m.status)
+	} else if m.transportBusy || strings.HasPrefix(m.status, "Buscando") {
+		feedback = warning.Render("… " + m.status)
+	}
+	lines = append(lines, "", feedback)
+	rendered := box.Render(strings.Join(lines, "\n"))
+	view := tea.NewView(lipgloss.PlaceHorizontal(max(m.width, boxWidth+6), lipgloss.Center, rendered))
 	view.AltScreen = true
 	return view
 }
