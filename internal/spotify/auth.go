@@ -26,13 +26,14 @@ import (
 const (
 	redirectURI    = "http://127.0.0.1:8989/callback"
 	keyringService = "SpotyGo Spotify"
-	scopes         = "user-read-playback-state user-modify-playback-state"
+	scopes         = "user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative"
 )
 
 type savedToken struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
+	Scopes       string    `json:"scopes"`
 }
 
 // Auth keeps the current Spotify grant in the operating system's credential store.
@@ -65,6 +66,12 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 		a.loaded = true
 	}
 
+	if a.token.RefreshToken != "" && !hasScopes(a.token.Scopes) {
+		if err := a.authorize(ctx); err != nil {
+			return "", err
+		}
+		return a.token.AccessToken, nil
+	}
 	if a.token.AccessToken != "" && time.Until(a.token.ExpiresAt) > 30*time.Second {
 		return a.token.AccessToken, nil
 	}
@@ -87,12 +94,26 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	return a.token.AccessToken, nil
 }
 
+func hasScopes(granted string) bool {
+	available := make(map[string]bool)
+	for _, scope := range strings.Fields(granted) {
+		available[scope] = true
+	}
+	for _, scope := range strings.Fields(scopes) {
+		if !available[scope] {
+			return false
+		}
+	}
+	return true
+}
+
 var errInvalidGrant = errors.New("Spotify invalid_grant")
 
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"`
 	Error        string `json:"error"`
 }
 
@@ -129,6 +150,9 @@ func (a *Auth) save(result tokenResponse) error {
 		a.token.RefreshToken = result.RefreshToken
 	}
 	a.token.ExpiresAt = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+	if result.Scope != "" {
+		a.token.Scopes = result.Scope
+	}
 	data, err := json.Marshal(a.token)
 	if err != nil {
 		return err
@@ -250,6 +274,9 @@ func (a *Auth) authorize(ctx context.Context) error {
 	}
 	if result.RefreshToken == "" {
 		return errors.New("Spotify no devolvió un refresh token")
+	}
+	if result.Scope == "" {
+		result.Scope = scopes
 	}
 	return a.save(result)
 }

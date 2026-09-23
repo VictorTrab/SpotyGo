@@ -36,6 +36,89 @@ type Track struct {
 	DurationMS int `json:"duration_ms"`
 }
 
+type Playlist struct {
+	ID    string `json:"id"`
+	URI   string `json:"uri"`
+	Name  string `json:"name"`
+	Items struct {
+		Total int `json:"total"`
+	} `json:"items"`
+}
+
+type PlaylistPage struct {
+	Items []Playlist `json:"items"`
+	Total int        `json:"total"`
+	Next  string     `json:"next"`
+}
+
+type PlaylistEntry struct {
+	Track    Track
+	Position int
+}
+
+type PlaylistEntriesPage struct {
+	Items []PlaylistEntry
+	Total int
+	Next  string
+}
+
+func (c *Client) Playlists(ctx context.Context, offset int) (PlaylistPage, error) {
+	if offset < 0 {
+		return PlaylistPage{}, errors.New("offset de playlists inválido")
+	}
+	query := url.Values{"limit": {"50"}, "offset": {strconv.Itoa(offset)}}
+	var page PlaylistPage
+	_, err := c.request(ctx, http.MethodGet, "/me/playlists?"+query.Encode(), nil, &page)
+	return page, err
+}
+
+func (c *Client) PlaylistEntries(ctx context.Context, playlistID string, offset int) (PlaylistEntriesPage, error) {
+	if playlistID == "" || offset < 0 {
+		return PlaylistEntriesPage{}, errors.New("playlist u offset inválido")
+	}
+	query := url.Values{"limit": {"50"}, "offset": {strconv.Itoa(offset)}}
+	var response struct {
+		Items []struct {
+			Item  *Track `json:"item"`
+			Track *Track `json:"track"`
+		} `json:"items"`
+		Total int    `json:"total"`
+		Next  string `json:"next"`
+	}
+	path := "/playlists/" + url.PathEscape(playlistID) + "/items?" + query.Encode()
+	_, err := c.request(ctx, http.MethodGet, path, nil, &response)
+	if err != nil {
+		return PlaylistEntriesPage{}, err
+	}
+	page := PlaylistEntriesPage{Total: response.Total, Next: response.Next}
+	for i, entry := range response.Items {
+		track := entry.Item
+		if track == nil {
+			track = entry.Track
+		}
+		if track != nil && strings.HasPrefix(track.URI, "spotify:track:") {
+			page.Items = append(page.Items, PlaylistEntry{Track: *track, Position: offset + i})
+		}
+	}
+	return page, nil
+}
+
+func (c *Client) PlayPlaylist(ctx context.Context, playlist Playlist, position int, deviceID string) error {
+	if playlist.ID == "" || deviceID == "" || position < 0 {
+		return errors.New("falta una playlist, canción o dispositivo")
+	}
+	uri := playlist.URI
+	if uri == "" {
+		uri = "spotify:playlist:" + playlist.ID
+	}
+	query := url.Values{"device_id": {deviceID}}
+	_, err := c.request(ctx, http.MethodPut, "/me/player/play?"+query.Encode(), map[string]any{
+		"context_uri": uri,
+		"offset":      map[string]int{"position": position},
+	}, nil)
+	return err
+}
+
 func (c *Client) SearchTracks(ctx context.Context, query string) ([]Track, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -66,6 +149,9 @@ type PlaybackState struct {
 	ProgressMS int     `json:"progress_ms"`
 	Item       *Track  `json:"item"`
 	Device     *Device `json:"device"`
+	Context    *struct {
+		URI string `json:"uri"`
+	} `json:"context"`
 }
 
 type Client struct {
