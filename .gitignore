@@ -1,0 +1,19 @@
+# Go binaries and build artifacts
+/bin/
+/dist/
+.cache/
+*.exe
+*.test
+*.out
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.log
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
