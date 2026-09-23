@@ -73,7 +73,9 @@ func run(args []string) error {
 		return err
 	}
 	defer engine.Stop()
-	program := tea.NewProgram(ui.New(spotify.NewClient(auth), engine.Name, engine.Done))
+	client := spotify.NewClient(auth)
+	defer client.Close()
+	program := tea.NewProgram(ui.New(client, engine.Name, engine.Done))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("interfaz: %w", err)
 	}

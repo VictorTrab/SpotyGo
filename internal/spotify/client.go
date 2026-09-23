@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,6 +89,11 @@ func (c *Client) PlaylistEntries(ctx context.Context, playlistID string, offset 
 	path := "/playlists/" + url.PathEscape(playlistID) + "/items?" + query.Encode()
 	_, err := c.request(ctx, http.MethodGet, path, nil, &response)
 	if err != nil {
+		if strings.Contains(err.Error(), "HTTP 403") {
+			if fallback, fallbackErr := c.playlistEntriesViaPlayer(ctx, playlistID, offset); fallbackErr == nil {
+				return fallback, nil
+			}
+		}
 		return PlaylistEntriesPage{}, err
 	}
 	page := PlaylistEntriesPage{Total: response.Total, Next: response.Next}
@@ -112,10 +118,18 @@ func (c *Client) PlayPlaylist(ctx context.Context, playlist Playlist, position i
 		uri = "spotify:playlist:" + playlist.ID
 	}
 	query := url.Values{"device_id": {deviceID}}
-	_, err := c.request(ctx, http.MethodPut, "/me/player/play?"+query.Encode(), map[string]any{
+	path := "/me/player/play?" + query.Encode()
+	payload := map[string]any{
 		"context_uri": uri,
 		"offset":      map[string]int{"position": position},
-	}, nil)
+	}
+	status, err := c.request(ctx, http.MethodPut, path, payload, nil)
+	if status >= 502 && status <= 504 {
+		if waitErr := waitUntil(ctx, time.Now().Add(400*time.Millisecond)); waitErr != nil {
+			return waitErr
+		}
+		_, err = c.request(ctx, http.MethodPut, path, payload, nil)
+	}
 	return err
 }
 
@@ -158,8 +172,38 @@ type Client struct {
 	auth         *Auth
 	http         *http.Client
 	mu           sync.Mutex
+	helperMu     sync.Mutex
+	helperStop   func()
 	next         time.Time
 	blockedUntil time.Time
+}
+
+// Close stops the optional hidden spotify-player data helper started by this client.
+func (c *Client) Close() {
+	c.helperMu.Lock()
+	defer c.helperMu.Unlock()
+	if c.helperStop != nil {
+		c.helperStop()
+		c.helperStop = nil
+	}
+}
+
+func (c *Client) ensureSpotifyPlayer(exe string) error {
+	c.helperMu.Lock()
+	defer c.helperMu.Unlock()
+	if c.helperStop != nil {
+		return nil
+	}
+	stop, err := startSpotifyPlayerHelper(exe)
+	if err != nil {
+		return err
+	}
+	c.helperStop = stop
+	return nil
+}
+
+func spotifyPlayerExecutable() (string, error) {
+	return exec.LookPath("spotify_player")
 }
 
 func NewClient(auth *Auth) *Client {

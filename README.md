@@ -45,7 +45,7 @@ Si cambias de aplicación de Spotify, usa `spotygo login --client-id NUEVO_ID`. 
 
 Los cambios rápidos de volumen se agrupan durante 180 ms. Las órdenes de reproducción se envían una a la vez, se ignoran las repeticiones de una tecla sostenida y se espera la confirmación de Spotify antes de aceptar respuestas de estado atrasadas. La interfaz ocupa toda la terminal, muestra una matriz Braille animada durante la reproducción y oculta los mensajes de estado cuando Spotify confirma el cambio. El estado se consulta cada siete segundos y las respuestas 429 respetan `Retry-After`.
 
-Spotify pide una autorización adicional la primera vez que se usa esta versión. Su API permite ver las canciones de playlists propias o colaborativas. Las playlists seguidas también aparecen y se pueden reproducir completas, pero Spotify devuelve 403 al intentar listar sus canciones.
+Spotify pide una autorización adicional la primera vez que se usa esta versión. Su API permite ver las canciones de playlists propias o colaborativas. Para las playlists seguidas que la API bloquea con 403, SpotyGo lee la lista mediante `spotify-player` si está instalado y autenticado. En Windows lo inicia oculto cuando hace falta y lo cierra al salir de SpotyGo. El audio sigue saliendo por librespot.
 
 El registro del motor de audio está en `%LOCALAPPDATA%\SpotyGo\librespot.log`. Si ya tienes un binario de librespot, puedes indicar su ruta mediante `SPOTYGO_LIBRESPOT`.
 
