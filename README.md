@@ -10,16 +10,29 @@ SpotyGo es un controlador remoto de Spotify para la terminal. El audio se reprod
 
 En la configuración de la aplicación de Spotify registra exactamente `http://127.0.0.1:8989/callback` como Redirect URI. SpotyGo usa OAuth PKCE y solicita los permisos `user-read-playback-state` y `user-modify-playback-state`.
 
-## Ejecutar
+## Instalar como comando global en Windows
 
-En PowerShell:
+Desde la carpeta del proyecto, ejecuta una sola vez en PowerShell:
 
 ```powershell
-$env:SPOTIFY_CLIENT_ID = "tu-client-id"
-go run .
+.\scripts\install.ps1 -ClientId "tu-client-id"
 ```
 
-La primera ejecución abre el navegador para autorizar el acceso. Los tokens se guardan en el almacén de credenciales del sistema operativo. El Client ID no es un secreto, pero se configura por entorno para que cada usuario use su propia app de Spotify.
+El instalador compila `spotygo.exe`, lo coloca en el `go\bin` del usuario y añade esa carpeta al PATH si hace falta. También guarda el Client ID para no tener que escribirlo otra vez y abre el navegador para autorizar Spotify si la sesión aún no existe. Si tu terminal anterior no reconoce el comando, abre una nueva.
+
+Después puedes ejecutarlo desde cualquier carpeta:
+
+```powershell
+spotygo
+```
+
+Para iniciar sesión cuando sea necesario:
+
+```powershell
+spotygo login
+```
+
+Si cambias de app de Spotify, usa `spotygo login --client-id NUEVO_ID`. El Client ID se guarda en la configuración del usuario; los tokens se guardan en el almacén de credenciales del sistema operativo. `SPOTIFY_CLIENT_ID` sigue disponible como configuración alternativa.
 
 ## Controles
 
