@@ -96,6 +96,18 @@ var registeredCommands = []CommandDef{
 		Action:      "help",
 	},
 	{
+		Name:        "version",
+		Aliases:     []string{"v", "about"},
+		Description: "Ver versión actual de SpotifyGo",
+		Action:      "version",
+	},
+	{
+		Name:        "update",
+		Aliases:     []string{"upgrade"},
+		Description: "Instrucciones para actualizar SpotifyGo",
+		Action:      "update",
+	},
+	{
 		Name:        "quit",
 		Aliases:     []string{"q", "exit"},
 		Description: "Cerrar SpotifyGo",

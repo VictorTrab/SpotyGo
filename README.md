@@ -86,6 +86,19 @@ spotifygo
 
 SpotifyGo iniciará el motor de audio en segundo plano y comenzará la reproducción en tu computadora de forma inmediata.
 
+### 3. Actualizar a la Última Versión
+Para actualizar SpotifyGo a la versión más reciente en cualquier momento:
+
+```bash
+spotifygo update
+```
+
+Para consultar la versión instalada:
+
+```bash
+spotifygo version
+```
+
 ---
 
 ## Controles y Atajos de Teclado
@@ -115,6 +128,8 @@ Escribe `/` en cualquier momento para desplegar la paleta de comandos:
 - `/theme` — Selector de temas de color (`Spotify`, `Synthwave`, `Tokyo Night`, `Nord`).
 - `/quality` — Selector de calidad de streaming de audio (`320k`, `160k`, `96k`).
 - `/devices` — Lista y selector de dispositivos Spotify Connect disponibles.
+- `/version` — Muestra la versión actual de la aplicación.
+- `/update` — Instrucciones para actualizar la aplicación.
 - `/search <texto>` — Búsqueda instantánea en catálogo de Spotify.
 - `/clear` — Limpia la caché local de carátulas y canciones.
 

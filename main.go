@@ -17,6 +17,7 @@ import (
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
 	"github.com/VictorTrab/SpotyGo/internal/theme"
 	"github.com/VictorTrab/SpotyGo/internal/ui"
+	"github.com/VictorTrab/SpotyGo/internal/version"
 )
 
 func main() {
@@ -35,6 +36,12 @@ func run(args []string) error {
 	clientIDOverride := ""
 	if len(args) > 0 {
 		switch args[0] {
+		case "version", "-v", "--version":
+			fmt.Println(version.Info())
+			fmt.Println(version.RepoURL)
+			return nil
+		case "update", "--update":
+			return version.RunUpdate()
 		case "login":
 			login = true
 			flags := flag.NewFlagSet("login", flag.ContinueOnError)
@@ -46,9 +53,15 @@ func run(args []string) error {
 				return errors.New("uso: spotifygo login [--client-id ID]")
 			}
 		case "help", "-h", "--help":
-			fmt.Println("Uso: spotifygo [login [--client-id ID]]")
-			fmt.Println("  spotifygo        Reproduce música en esta computadora")
-			fmt.Println("  spotifygo login  Inicia o comprueba la sesión de Spotify")
+			fmt.Printf("SpotifyGo %s - Reproductor y cliente de Spotify en terminal\n\n", version.Current)
+			fmt.Println("Uso: spotifygo [comando] [opciones]")
+			fmt.Println()
+			fmt.Println("Comandos:")
+			fmt.Println("  spotifygo                      Inicia el reproductor en la terminal")
+			fmt.Println("  spotifygo login                Inicia o comprueba la sesión de Spotify")
+			fmt.Println("  spotifygo update               Actualiza SpotifyGo a la última versión")
+			fmt.Println("  spotifygo version, -v          Muestra la versión instalada")
+			fmt.Println("  spotifygo help, -h             Muestra esta ayuda")
 			return nil
 		default:
 			return fmt.Errorf("comando desconocido %q; usa spotifygo --help", args[0])

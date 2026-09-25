@@ -17,6 +17,7 @@ import (
 	"github.com/VictorTrab/SpotyGo/internal/player"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
 	"github.com/VictorTrab/SpotyGo/internal/theme"
+	"github.com/VictorTrab/SpotyGo/internal/version"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -1461,7 +1462,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					return m, toastCmd
 				case "help":
 					m.status = ""
-					toastCmd := m.triggerToast("💡 Comandos: /art, /search, /play, /pause, /background, /theme, /devices, /quality, /help", 25)
+					toastCmd := m.triggerToast("💡 Comandos: /art, /search, /play, /pause, /background, /theme, /devices, /quality, /version, /update, /help", 25)
+					return m, toastCmd
+				case "version":
+					m.status = ""
+					toastCmd := m.triggerToast("SpotifyGo "+version.Current+" (GitHub: VictorTrab/SpotyGo)", 25)
+					return m, toastCmd
+				case "update":
+					m.status = ""
+					toastCmd := m.triggerToast("Para actualizar, ejecuta 'spotifygo update' desde tu terminal", 25)
 					return m, toastCmd
 				}
 				return m, nil

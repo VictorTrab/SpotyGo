@@ -107,6 +107,12 @@ $projectDir = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot '..\mai
     $null
 }
 
+if (Test-Path -LiteralPath $target) {
+    $bak = "$target.bak"
+    Remove-Item $bak -Force -ErrorAction SilentlyContinue
+    Move-Item $target $bak -Force -ErrorAction SilentlyContinue
+}
+
 if ($projectDir -and (Test-Path (Join-Path $projectDir 'main.go'))) {
     Write-Host "Compilando SpotifyGo desde codigo local..." -ForegroundColor Cyan
     Push-Location $projectDir
@@ -115,6 +121,7 @@ if ($projectDir -and (Test-Path (Join-Path $projectDir 'main.go'))) {
         if ($LASTEXITCODE -ne 0) { throw 'No se pudo compilar SpotifyGo.' }
     } finally {
         Pop-Location
+        Remove-Item "$target.bak" -Force -ErrorAction SilentlyContinue
     }
 } else {
     Write-Host "Descargando ultima version de SpotifyGo desde GitHub..." -ForegroundColor Cyan
