@@ -19,32 +19,33 @@
 
 ---
 
-## ⚡ Instalación Rápida (1 Solo Comando)
+## Instalación Rápida (1 Solo Comando)
 
-En tu terminal de **PowerShell** (ejecutada como usuario normal), copia y pega este comando para descargar, compilar e instalar **SpotifyGo** automáticamente:
+En tu terminal de **PowerShell** (ejecutada como usuario normal), copia y pega este comando:
 
 ```powershell
 irm https://raw.githubusercontent.com/VictorTrab/SpotyGo/main/scripts/install.ps1 | iex
 ```
 
-> **Requisitos Previos:**
-> - [Go 1.22+](https://go.dev/dl/) instalado en el sistema.
-> - [Rust / Cargo](https://rustup.rs/) (utilizado automáticamente por el instalador para compilar el motor de audio `librespot` si aún no lo tienes).
-> - Cuenta de **Spotify Premium** (requerida por la API de Spotify Connect para streaming de audio nativo).
+El script se encarga de todo el proceso de forma 100% desatendida:
+- Detecta si tienes **Go** instalado; si no está, lo descarga e instala automáticamente.
+- Detecta si tienes **Rust/Cargo** y el motor de audio **librespot**; si no están, los descarga y compila automáticamente.
+- Descarga el código fuente de SpotifyGo, lo compila y lo ubica en tu carpeta de binarios de usuario (`go\bin`), agregándolo a tu variable `PATH`.
+- Requiere únicamente una cuenta de **Spotify Premium** (necesaria para el streaming nativo de audio vía Spotify Connect).
 
 ---
 
-## 📸 Capturas de Pantalla
+## Capturas de Pantalla
 
 ### Vista Principal (Reproductor TUI + Tarjeta Now-Playing + Playlists)
-Fondo degradado ambiental reactivo a la carátula, información completa de álbum y año, barra de progreso y navegación por tus listas.
+Fondo degradado ambiental reactivo a la carátula, metadatos completos de álbum y año, barra de progreso y navegación por tus listas.
 
 <p align="center">
   <img src="assets/preview-main.png" alt="SpotifyGo Main View" width="850" />
 </p>
 
 ### Modo Zen / Big Cover Art (`/art` o tecla `z`)
-Sanctuary inmersivo con carátula TrueColor en alta resolución y cielo nocturno con estrellas titilantes en tiempo real.
+Visualización inmersiva con carátula TrueColor ampliada y cielo nocturno con estrellas titilantes en tiempo real.
 
 <p align="center">
   <img src="assets/preview-zen.png" alt="SpotifyGo Zen Mode" width="850" />
@@ -52,20 +53,20 @@ Sanctuary inmersivo con carátula TrueColor en alta resolución y cielo nocturno
 
 ---
 
-## ✨ Características Principales
+## Características Principales
 
-- 🎵 **Reproducción Nativa de Alta Fidelidad (HQ 320k):** Motor de streaming integrado con soporte para 96k, 160k y 320k seleccionable en caliente mediante `/quality`.
-- 🎨 **Carátulas TrueColor en ANSI (`▀`):** Rasterizador de semibloques que despliega carátulas nítidas directamente en la terminal.
-- 🌌 **Modo Zen Sanctuary (`z` o `/art`):** Experiencia minimalista con carátula ampliada y un cielo de estrellas vivas generadas proceduralmente.
-- 🌈 **Fondo con Degradado Reactivo:** Iluminación dinámica que extrae los colores dominantes del álbum y baña la terminal suavemente (modos `gradient`, `flow`, `dark` y `transparent` mediante `/bg`).
-- ⚡ **Caché en 2 Niveles (0.0 ms):** Sistema de caché en memoria RAM y disco SSD para metadatos y carátulas. Cero llamadas redundantes y adiós definitivo a los bloqueos HTTP 429.
-- 🍃 **Eco-Power Zero-Idle:** Detección de foco de terminal (`xterm 1004h`). Cuando la ventana no está activa, el consumo de CPU desciende al **0.0%** sin detener la música.
-- ⌨️ **Navegación Fluida y Paleta de Comandos (`/`):** Control estilo Vim (`j`/`k`, `p`, `Space`), búsqueda difusa en tiempo real y buscador de comandos interactivo.
-- 🔒 **Seguridad y Privacidad Absoluta:** Autenticación mediante **OAuth 2.0 PKCE** local. Ninguna credencial, contraseña ni token personal sale de tu equipo.
+- **Reproducción Nativa de Alta Fidelidad (HQ 320k):** Motor de streaming integrado con soporte para 96k, 160k y 320k seleccionable en caliente mediante `/quality`.
+- **Carátulas TrueColor en ANSI (`▀`):** Rasterizador de semibloques que despliega carátulas nítidas directamente en la terminal.
+- **Modo Zen Sanctuary (`z` o `/art`):** Experiencia minimalista con carátula ampliada y un cielo de estrellas vivas generadas proceduralmente.
+- **Fondo con Degradado Reactivo:** Iluminación dinámica que extrae los colores dominantes del álbum y baña la terminal suavemente (modos `gradient`, `flow`, `dark` y `transparent` mediante `/bg`).
+- **Caché en 2 Niveles (0.0 ms):** Sistema de almacenamiento en memoria RAM y disco SSD para metadatos y carátulas. Cero llamadas redundantes y prevención de bloqueos HTTP 429.
+- **Eco-Power Zero-Idle:** Detección de foco de terminal (`xterm 1004h`). Cuando la ventana no está activa, el consumo de CPU desciende al **0.0%** sin detener la música.
+- **Navegación Fluida y Paleta de Comandos (`/`):** Control estilo Vim (`j`/`k`, `p`, `Space`), búsqueda difusa en tiempo real y buscador de comandos interactivo.
+- **Seguridad y Privacidad Absoluta:** Autenticación mediante **OAuth 2.0 PKCE** local. Ninguna credencial, contraseña ni token personal sale de tu equipo.
 
 ---
 
-## 🚀 Primeros Pasos
+## Primeros Pasos
 
 ### 1. Iniciar Sesión por Primera Vez
 Ejecuta en tu terminal:
@@ -87,7 +88,7 @@ SpotifyGo iniciará el motor de audio en segundo plano y comenzará la reproducc
 
 ---
 
-## 🎮 Controles y Atajos de Teclado
+## Controles y Atajos de Teclado
 
 ### Controles Básicos
 | Tecla | Acción |
@@ -119,7 +120,7 @@ Escribe `/` en cualquier momento para desplegar la paleta de comandos:
 
 ---
 
-## 🛠️ Compilación Manual desde el Código Fuente
+## Compilación Manual desde el Código Fuente
 
 Si prefieres clonar y compilar el proyecto manualmente:
 
@@ -128,7 +129,7 @@ Si prefieres clonar y compilar el proyecto manualmente:
 git clone https://github.com/VictorTrab/SpotyGo.git
 cd SpotyGo
 
-# Compilar todas las pruebas unitarias (64 tests)
+# Ejecutar las pruebas unitarias (64 tests)
 go test -v ./...
 
 # Compilar el binario ejecutable
@@ -142,12 +143,12 @@ Para más detalles sobre los componentes internos y el flujo de datos, consulta 
 
 ---
 
-## 📄 Licencia
+## Licencia
 
 Este proyecto está bajo la licencia libre y abierta **MIT**. Consulta el archivo [LICENSE](LICENSE) para más detalles.
 
 ---
 
 <p align="center">
-  Hecho con ❤️ para la comunidad de terminal por <a href="https://github.com/VictorTrab">VictorTrab</a>
+  Desarrollado para la comunidad de terminal por <a href="https://github.com/VictorTrab">VictorTrab</a>
 </p>
