@@ -6,11 +6,17 @@
 *.test
 *.out
 
-# Local configuration and credentials
+# Local configuration, logs and credentials
 .env
 .env.*
 !.env.example
 *.log
+*.old
+*.tmp
+credentials.json
+token.json
+config.json
+cache/
 
 # Editor and operating system files
 .vscode/

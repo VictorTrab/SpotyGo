@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -24,9 +25,10 @@ import (
 )
 
 const (
+	DefaultClientID = "d420a117a32841c2b3474932e49fb54b"
 	redirectURI    = "http://127.0.0.1:8989/callback"
 	keyringService = "SpotyGo Spotify"
-	scopes         = "user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative"
+	scopes         = "user-read-playback-state user-modify-playback-state user-read-currently-playing streaming app-remote-control playlist-read-private playlist-read-collaborative user-library-read user-read-recently-played user-top-read"
 )
 
 type savedToken struct {
@@ -46,6 +48,9 @@ type Auth struct {
 }
 
 func NewAuth(clientID string) *Auth {
+	if clientID == "" {
+		clientID = DefaultClientID
+	}
 	return &Auth{clientID: clientID, http: &http.Client{Timeout: 12 * time.Second}}
 }
 
@@ -61,6 +66,16 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 		if err == nil {
 			if err := json.Unmarshal([]byte(stored), &a.token); err != nil {
 				return "", fmt.Errorf("credenciales guardadas inválidas: %w", err)
+			}
+		} else {
+			if imported, ok := tryImportSpotifyPlayerToken(a.clientID); ok {
+				a.token = imported
+				_ = a.save(tokenResponse{
+					AccessToken:  imported.AccessToken,
+					RefreshToken: imported.RefreshToken,
+					ExpiresIn:    int(max(0, time.Until(imported.ExpiresAt).Seconds())),
+					Scope:        imported.Scopes,
+				})
 			}
 		}
 		a.loaded = true
@@ -94,12 +109,49 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	return a.token.AccessToken, nil
 }
 
+func tryImportSpotifyPlayerToken(clientID string) (savedToken, bool) {
+	candidates := make([]string, 0, 2)
+	if cacheDir, err := os.UserCacheDir(); err == nil {
+		candidates = append(candidates, filepath.Join(cacheDir, "spotify-player", clientID+"_token.json"))
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(homeDir, ".cache", "spotify-player", clientID+"_token.json"))
+	}
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var parsed struct {
+			AccessToken  string    `json:"access_token"`
+			RefreshToken string    `json:"refresh_token"`
+			ExpiresAt    time.Time `json:"expires_at"`
+			Scope        string    `json:"scope"`
+		}
+		if err := json.Unmarshal(data, &parsed); err == nil && parsed.RefreshToken != "" {
+			return savedToken{
+				AccessToken:  parsed.AccessToken,
+				RefreshToken: parsed.RefreshToken,
+				ExpiresAt:    parsed.ExpiresAt,
+				Scopes:       parsed.Scope,
+			}, true
+		}
+	}
+	return savedToken{}, false
+}
+
 func hasScopes(granted string) bool {
 	available := make(map[string]bool)
 	for _, scope := range strings.Fields(granted) {
 		available[scope] = true
 	}
-	for _, scope := range strings.Fields(scopes) {
+	required := []string{
+		"user-read-playback-state",
+		"user-modify-playback-state",
+		"playlist-read-private",
+		"user-library-read",
+	}
+	for _, scope := range required {
 		if !available[scope] {
 			return false
 		}

@@ -12,13 +12,19 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/VictorTrab/SpotyGo/internal/logger"
 	"github.com/VictorTrab/SpotyGo/internal/player"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
+	"github.com/VictorTrab/SpotyGo/internal/theme"
 	"github.com/VictorTrab/SpotyGo/internal/ui"
 )
 
 func main() {
+	_ = logger.Init()
+	defer logger.Close()
+
 	if err := run(os.Args[1:]); err != nil {
+		logger.Error("Ejecución finalizada con error: %v", err)
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -37,15 +43,15 @@ func run(args []string) error {
 				return err
 			}
 			if flags.NArg() != 0 {
-				return errors.New("uso: spotygo login [--client-id ID]")
+				return errors.New("uso: spotifygo login [--client-id ID]")
 			}
 		case "help", "-h", "--help":
-			fmt.Println("Uso: spotygo [login [--client-id ID]]")
-			fmt.Println("  spotygo        Reproduce música en esta computadora")
-			fmt.Println("  spotygo login  Inicia o comprueba la sesión de Spotify")
+			fmt.Println("Uso: spotifygo [login [--client-id ID]]")
+			fmt.Println("  spotifygo        Reproduce música en esta computadora")
+			fmt.Println("  spotifygo login  Inicia o comprueba la sesión de Spotify")
 			return nil
 		default:
-			return fmt.Errorf("comando desconocido %q; usa spotygo --help", args[0])
+			return fmt.Errorf("comando desconocido %q; usa spotifygo --help", args[0])
 		}
 	}
 	clientID, err := resolveClientID(clientIDOverride)
@@ -53,7 +59,7 @@ func run(args []string) error {
 		return err
 	}
 	if clientID == "" {
-		return errors.New("falta el Client ID; ejecuta spotygo login --client-id TU_CLIENT_ID")
+		return errors.New("falta el Client ID; ejecuta spotifygo login --client-id TU_CLIENT_ID")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -65,18 +71,23 @@ func run(args []string) error {
 		if err := saveClientID(clientID); err != nil {
 			return err
 		}
-		fmt.Println("Sesión de Spotify activa. Ejecuta spotygo para abrir la interfaz.")
+		fmt.Println("Sesión de Spotify activa. Ejecuta spotifygo para abrir la interfaz.")
 		return nil
 	}
-	engine, err := player.Start()
+	cfg := theme.LoadConfig()
+	engine, err := player.Start(cfg.Bitrate)
 	if err != nil {
 		return err
 	}
 	defer engine.Stop()
 	client := spotify.NewClient(auth)
 	defer client.Close()
-	program := tea.NewProgram(ui.New(client, engine.Name, engine.Done))
-	if _, err := program.Run(); err != nil {
+	m := ui.New(client, engine.Name, engine.Done, engine.Events, engine.VolumeEvents)
+	m.SetEngineRestarter(engine.Restart)
+	m.SetTrackEvents(engine.TrackEvents)
+	m.EnableIntro()
+	program := tea.NewProgram(m, tea.WithContext(ctx))
+	if _, err := program.Run(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 		return fmt.Errorf("interfaz: %w", err)
 	}
 	return nil
@@ -99,22 +110,25 @@ func resolveClientID(override string) (string, error) {
 	}
 	path, err := configPath()
 	if err != nil {
-		return "", err
+		return spotify.DefaultClientID, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
+		return spotify.DefaultClientID, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("leer configuración: %w", err)
+		return spotify.DefaultClientID, nil
 	}
 	var config struct {
 		ClientID string `json:"client_id"`
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
-		return "", fmt.Errorf("configuración inválida: %w", err)
+		return spotify.DefaultClientID, nil
 	}
-	return strings.TrimSpace(config.ClientID), nil
+	if id := strings.TrimSpace(config.ClientID); id != "" && id != "b9e100e89b6e4a17b81e3ad3803414d5" {
+		return id, nil
+	}
+	return spotify.DefaultClientID, nil
 }
 
 func saveClientID(id string) error {
