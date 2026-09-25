@@ -354,9 +354,9 @@ func TestQualityCommandAndHotRestart(t *testing.T) {
 		t.Fatalf("expected restarter called with 160, got %s", restartedWith)
 	}
 
-	// Now switch back to 320 with "/ quality alta"
+	// Now switch back to 320 with "/ quality high"
 	m.commandActive = true
-	m.commandInput = "quality alta"
+	m.commandInput = "quality high"
 	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = next.(Model)
 	if m.bitrate != "320" {
@@ -938,8 +938,8 @@ func TestCommandPaletteNavigationAndSearch(t *testing.T) {
 	// 4. Verify View() contains properly closed box and scroll indicator
 	view := m.View()
 	stripped := ansi.Strip(view.Content)
-	if !strings.Contains(stripped, "COMANDOS") {
-		t.Fatal("expected COMANDOS header in command palette view")
+	if !strings.Contains(stripped, "COMMANDS") {
+		t.Fatal("expected COMMANDS header in command palette view")
 	}
 	if !strings.Contains(stripped, "│ /") {
 		t.Fatal("expected search prompt in command palette view")

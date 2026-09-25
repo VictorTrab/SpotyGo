@@ -121,17 +121,24 @@ spotifygo version
 | `q` / `Ctrl+C` | Salir de SpotifyGo |
 
 ### Comandos Rápidos (`/`)
-Escribe `/` en cualquier momento para desplegar la paleta de comandos:
+Escribe `/` en cualquier momento para desplegar la paleta de comandos interactiva:
 
-- `/art` — Alterna la vista Zen con arte a gran escala y cielo estrellado.
-- `/bg` — Alterna modos de fondo (`gradient`, `flow`, `dark`, `transparent`).
+- `/play` — Reanuda la reproducción.
+- `/pause` — Pausa la reproducción.
+- `/next` — Salta a la siguiente pista.
+- `/prev` — Vuelve a la pista anterior.
+- `/playlists` — Muestra tus playlists guardadas.
+- `/search <query>` — Búsqueda instantánea de pistas o artistas en Spotify.
+- `/art` — Alterna la vista Zen con carátula en alta definición y cielo estrellado.
+- `/bg <modo>` — Cambia el modo de fondo (`default`, `flow`, `dark`).
 - `/theme` — Selector de temas de color (`Spotify`, `Synthwave`, `Tokyo Night`, `Nord`).
-- `/quality` — Selector de calidad de streaming de audio (`320k`, `160k`, `96k`).
+- `/quality <bitrate>` — Calidad de audio (`320k` alta, `160k` media, `96k` baja).
 - `/devices` — Lista y selector de dispositivos Spotify Connect disponibles.
-- `/version` — Muestra la versión actual de la aplicación.
-- `/update` — Instrucciones para actualizar la aplicación.
-- `/search <texto>` — Búsqueda instantánea en catálogo de Spotify.
-- `/clear` — Limpia la caché local de carátulas y canciones.
+- `/volume <0-100>` — Ajusta el volumen de reproducción.
+- `/version` — Muestra la versión actual instalada.
+- `/update` — Instrucciones para actualizar la aplicación a la última versión.
+- `/help` — Muestra la lista de comandos y atajos disponibles.
+- `/quit` — Cierra SpotifyGo.
 
 ---
 

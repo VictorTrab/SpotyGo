@@ -1365,14 +1365,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if len(args) > 1 {
 						arg := strings.ToLower(args[1])
 						switch arg {
-						case "160", "media", "med", "normal", "medium":
+						case "160", "normal", "medium", "med", "mq":
 							targetBitrate = "160"
-						case "320", "high", "alta", "max", "extreme":
+						case "320", "high", "max", "extreme", "hq":
 							targetBitrate = "320"
-						case "96", "low", "baja":
+						case "96", "low", "lq":
 							targetBitrate = "96"
 						default:
-							m.status = fmt.Sprintf("Calidad no válida: %q (usa 320 para alta o 160 para media)", arg)
+							m.status = fmt.Sprintf("Invalid quality: %q (use '320' or '160')", arg)
 							m.statusError = true
 							return m, nil
 						}
@@ -1393,7 +1393,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						label = "160 kbps (MQ)"
 					}
-					m.status = fmt.Sprintf("Calidad de audio fijada en %s", label)
+					m.status = fmt.Sprintf("Audio quality set to %s", label)
 					m.statusError = false
 
 					if m.engineRestart != nil {
@@ -1410,14 +1410,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 						arg := strings.ToLower(args[1])
 						targetBg := ""
 						switch arg {
-						case "default", "gradient", "degradado", "def":
+						case "default", "gradient", "def":
 							targetBg = "default"
-						case "flow", "animado", "movimiento", "wave":
+						case "flow", "wave", "motion":
 							targetBg = "flow"
-						case "dark", "oscuro", "negro", "tema":
+						case "dark", "theme":
 							targetBg = "dark"
 						default:
-							m.status = fmt.Sprintf("Fondo no válido: %q (usa 'default', 'flow' o 'dark')", arg)
+							m.status = fmt.Sprintf("Invalid background: %q (use 'default', 'flow', or 'dark')", arg)
 							m.statusError = true
 							return m, nil
 						}
@@ -1426,18 +1426,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 						var label string
 						switch targetBg {
 						case "default":
-							label = "Degradado reactivo (default)"
+							label = "Reactive gradient (default)"
 						case "flow":
-							label = "Degradado en movimiento (flow)"
+							label = "Animated gradient (flow)"
 						case "dark":
-							label = "Oscuro del tema (dark)"
+							label = "Theme dark (dark)"
 						}
 						m.status = ""
-						toastCmd := m.triggerToast("🎨 Fondo fijado en: "+label, 14)
+						toastCmd := m.triggerToast("Background set to: "+label, 14)
 						return m, toastCmd
 					}
 
-					// Sin argumentos: abre el modal interactivo de estilos de fondo
+					// Without arguments: open interactive background modal
 					m.commandActive = false
 					m.commandInput = ""
 					m.setView(viewBgPicker)
@@ -1454,23 +1454,23 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				case "art", "cover", "zen":
 					if m.currentView == viewCoverArt {
 						m.setView(viewPlaylists)
-						toastCmd := m.triggerToast("📁 Playlists visibles", 12)
+						toastCmd := m.triggerToast("Playlists view", 12)
 						return m, toastCmd
 					}
 					m.setView(viewCoverArt)
-					toastCmd := m.triggerToast("🖼️   Carátula HD (pulsa 'z' o Esc para volver)", 14)
+					toastCmd := m.triggerToast("Zen Mode (press 'z' or Esc to return)", 14)
 					return m, toastCmd
 				case "help":
 					m.status = ""
-					toastCmd := m.triggerToast("💡 Comandos: /art, /search, /play, /pause, /background, /theme, /devices, /quality, /version, /update, /help", 25)
+					toastCmd := m.triggerToast("Commands: /art, /search, /play, /pause, /background, /theme, /devices, /quality, /version, /update, /help", 25)
 					return m, toastCmd
 				case "version":
 					m.status = ""
-					toastCmd := m.triggerToast("SpotifyGo "+version.Current+" (GitHub: VictorTrab/SpotyGo)", 25)
+					toastCmd := m.triggerToast("SpotifyGo "+version.Current+" (github.com/VictorTrab/SpotyGo)", 25)
 					return m, toastCmd
 				case "update":
 					m.status = ""
-					toastCmd := m.triggerToast("Para actualizar, ejecuta 'spotifygo update' desde tu terminal", 25)
+					toastCmd := m.triggerToast("To update, run 'spotifygo update' in your terminal", 25)
 					return m, toastCmd
 				}
 				return m, nil
@@ -2419,8 +2419,8 @@ func (m Model) View() tea.View {
 		padLeft := "  "
 		innerW := boxWidth - 4 // content width between "│ " and " │"
 
-		// 1. Top border: "╭─ COMANDOS ────────────────────────╮"
-		title := " COMANDOS "
+		// 1. Top border: "╭─ COMMANDS ────────────────────────╮"
+		title := " COMMANDS "
 		dashCount := max(0, boxWidth-2-1-len(title)) // -2 for "╭─", -1 for "╮"
 		topLine := padLeft + boxBorder.Render("╭─"+bright.Bold(true).Render(title)+strings.Repeat("─", dashCount)+"╮")
 		body = append(body, topLine)
@@ -2438,7 +2438,7 @@ func (m Model) View() tea.View {
 
 		// 4. Commands list with scroll viewport
 		if len(m.commandMatches) == 0 {
-			emptyText := dim.Render("Sin coincidencias (ej: search, quit, theme, devices)")
+			emptyText := dim.Render("No matches (e.g. search, quit, theme, devices)")
 			padEmpty := max(0, innerW-ansi.StringWidth(emptyText))
 			emptyLine := padLeft + boxBorder.Render("│ ") + emptyText + strings.Repeat(" ", padEmpty) + boxBorder.Render(" │")
 			body = append(body, emptyLine)
@@ -2494,7 +2494,7 @@ func (m Model) View() tea.View {
 			bottomLine = padLeft + boxBorder.Render("╰"+strings.Repeat("─", boxWidth-2)+"╯")
 		}
 		body = append(body, bottomLine)
-		body = append(body, padLeft+" "+muted.Render("↑/↓: navegar · Enter: ejecutar · Esc: cancelar"))
+		body = append(body, padLeft+" "+muted.Render("↑/↓: navigate · Enter: select · Esc: cancel"))
 	}
 
 	space := max(0, height-len(lines))
