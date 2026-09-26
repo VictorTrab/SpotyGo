@@ -19,7 +19,7 @@ import (
 
 var (
 	// Version is the current semantic version of SpotifyGo.
-	Current = "v1.0.5"
+	Current = "v1.0.6"
 	// RepoOwner is the GitHub repository owner.
 	RepoOwner = "VictorTrab"
 	// RepoName is the GitHub repository name.
@@ -312,6 +312,24 @@ type Highlight struct {
 // RecentHighlights returns curated bullet points of recent updates.
 func RecentHighlights() []Highlight {
 	return []Highlight{
+		{
+			Version: "v1.0.6",
+			Tagline: "Zen independiente, flow controlado y sincronización precisa",
+			Points: []string{
+				"Sondeo adaptativo del estado de reproducción: el cambio de canción hecho desde otro dispositivo aparece en segundos",
+				"Refresco inmediato al pulsar cualquier tecla si el estado tiene más de 3 segundos de antigüedad",
+				"Sondeo de frontera: reintento automático justo al terminar cada canción para no mostrar la pista anterior",
+				"Flow conserva su lienzo animado en modo Zen; la interfaz normal queda estática",
+				"Entrada de carátula y textos de Zen a ~30 FPS durante 1 segundo con reloj independiente",
+				"Pausar y reanudar esperan la respuesta de Spotify antes de actualizar el estado y el reloj del reproductor",
+				"La paleta / conserva solo acciones sin atajo en el footer y muestra sus explicaciones en español",
+				"Selector de fondo con 'flow' como primera opción y por defecto, más comando de terminal 'spotifygo background'",
+				"Notificaciones con voz cercana y caritas kaomoji, totalmente en español",
+				"Contraste uniforme garantizado (WCAG >= 4.5:1) en todo el fondo, sin bandas oscuras detrás de la tarjeta ni de las listas",
+				"Nuevo comando 'spotifygo doctor' para diagnosticar cuenta, scopes y estado de la API",
+				"Los tests ya no escriben en tu configuración ni en tu log reales",
+			},
+		},
 		{
 			Version: "v1.0.5",
 			Tagline: "Alto contraste en todos los modos, espaciado perfecto de emojis y enfoque en temas oscuros",

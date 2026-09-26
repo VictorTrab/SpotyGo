@@ -54,6 +54,16 @@ func NewAuth(clientID string) *Auth {
 	return &Auth{clientID: clientID, http: &http.Client{Timeout: 12 * time.Second}}
 }
 
+// ClientID returns the Spotify application client ID in use.
+func (a *Auth) ClientID() string { return a.clientID }
+
+// Scopes returns the OAuth scopes granted for the stored token.
+func (a *Auth) Scopes() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.token.Scopes
+}
+
 func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

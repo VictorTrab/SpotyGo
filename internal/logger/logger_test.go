@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+// TestMain keeps the suite out of the real user log file.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "spotygo-logger-test")
+	if err != nil {
+		os.Exit(m.Run())
+	}
+	previous, hadPrevious := os.LookupEnv("LOCALAPPDATA")
+	_ = os.Setenv("LOCALAPPDATA", dir)
+
+	code := m.Run()
+
+	if hadPrevious {
+		_ = os.Setenv("LOCALAPPDATA", previous)
+	} else {
+		_ = os.Unsetenv("LOCALAPPDATA")
+	}
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 func TestLogger(t *testing.T) {
 	if err := Init(); err != nil {
 		t.Fatalf("Init() error = %v", err)

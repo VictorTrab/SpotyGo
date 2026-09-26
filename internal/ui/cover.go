@@ -212,8 +212,8 @@ func RenderBlurredCoverLines(img image.Image, prevImg image.Image, widthChars, h
 
 	progress = max(0.0, min(1.0, progress))
 
-	// Smooth continuous multi-tier blur blending:
-	// Eliminates abrupt radius jumps, creating a silky 6-second optical refocusing effect
+	// Smooth continuous multi-tier blur blending eliminates abrupt radius jumps
+	// while the Zen transition clock progressively sharpens the cover.
 	var blurred image.Image
 	switch {
 	case progress < 0.40:
@@ -341,7 +341,6 @@ func getInterpolatedPixel(x, y int, blurred, sharp, prev image.Image, sharpWeigh
 	}
 }
 
-
 // processCoverImage renders both standard and high-resolution TrueColor covers and extracts the dominant color.
 func processCoverImage(img image.Image, widthChars, heightChars int) CoverData {
 	lines := RenderCoverLines(img, widthChars, heightChars)
@@ -449,9 +448,9 @@ func rgbToHSL(r, g, b uint8) (h, s, l float64) {
 			h += 6.0
 		}
 	case gf:
-		h = (bf - rf)/delta + 2.0
+		h = (bf-rf)/delta + 2.0
 	case bf:
-		h = (rf - gf)/delta + 4.0
+		h = (rf-gf)/delta + 4.0
 	}
 	h *= 60.0
 	if h < 0 {

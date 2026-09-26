@@ -157,6 +157,11 @@ type Config struct {
 	Theme      string `json:"theme"`
 	Bitrate    string `json:"bitrate"`
 	Background string `json:"background"`
+
+	// BackgroundMigrated records that the legacy background preference has already
+	// been normalized, so a deliberate choice of "gradient" made afterwards is
+	// never overwritten again.
+	BackgroundMigrated bool `json:"background_migrated"`
 }
 
 func configPath() string {
@@ -173,15 +178,20 @@ func configPath() string {
 }
 
 // LoadConfig loads user configuration or defaults.
+//
+// It also performs the one-time background migration: the old picker listed an
+// ambiguous "default (gradient)" first and stored it as "default"/"gradient", so
+// those legacy values become the current default ("flow") exactly once. An
+// explicit "dark" choice, and any later choice, is preserved.
 func LoadConfig() Config {
 	p := configPath()
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return Config{Theme: "spotify-dark", Bitrate: "320", Background: "flow"}
+		return DefaultConfig()
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return Config{Theme: "spotify-dark", Bitrate: "320", Background: "flow"}
+		return DefaultConfig()
 	}
 	if cfg.Theme == "" {
 		cfg.Theme = "spotify-dark"
@@ -192,7 +202,20 @@ func LoadConfig() Config {
 	if cfg.Background == "" {
 		cfg.Background = "flow"
 	}
+	if !cfg.BackgroundMigrated {
+		switch cfg.Background {
+		case "gradient", "default":
+			cfg.Background = "flow"
+		}
+		cfg.BackgroundMigrated = true
+		_ = SaveConfig(cfg)
+	}
 	return cfg
+}
+
+// DefaultConfig returns the out-of-the-box preferences.
+func DefaultConfig() Config {
+	return Config{Theme: "spotify-dark", Bitrate: "320", Background: "flow", BackgroundMigrated: true}
 }
 
 // SaveConfig saves the configuration to disk.

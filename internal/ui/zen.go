@@ -4,7 +4,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -111,25 +110,9 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	targetHeight := max(1, height-1)
 	lines := make([]string, targetHeight)
 
-	// 1. Background color palette
-	bgBase := m.theme.BgBase
-	if bgBase == "" {
-		bgBase = "#080808"
-	}
-	topColor := LerpHex("#27272a", bgBase, 0.50)
-	secColor := bgBase
-	if m.coverData != nil && m.coverData.DominantHex != "" {
-		topColor = LerpHex(m.coverData.DominantHex, bgBase, 0.75)
-		if m.coverData.SecondaryHex != "" {
-			secColor = LerpHex(m.coverData.SecondaryHex, bgBase, 0.85)
-		} else {
-			secColor = LerpHex(topColor, bgBase, 0.50)
-		}
-	}
-	if m.bgMode == "dark" {
-		topColor = bgBase
-		secColor = bgBase
-	}
+	// 1. Reactive background canvas (only "dark" mode uses the theme background)
+	canvas := NewCanvas(m.bgMode, m.coverData, m.theme.BgBase, m.theme.Text, m.theme.Muted, m.zenFrame)
+	topColor := canvas.Top
 
 	// 2. Responsive square cover dimensions
 	// Reserve 6 rows for: 2 borders, 1 blank, 1 track, 1 artist, 1 fuse bar
@@ -161,10 +144,7 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 		}
 	}
 
-	position := m.state.ProgressMS
-	if m.state.IsPlaying && !m.lastSync.IsZero() {
-		position += int(time.Since(m.lastSync).Milliseconds())
-	}
+	position := m.currentPositionMS()
 	fraction := 0.0
 	if m.state.Item != nil && m.state.Item.DurationMS > 0 {
 		position = min(position, m.state.Item.DurationMS)
@@ -177,14 +157,14 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 
 	// Audio-reactive rhythm border: subtle breathing with music pulse (~115 BPM)
 	borderBaseTone := "#52525b"
-	borderColor := computeRhythmBorderColor(LerpHex(topColor, borderBaseTone, 0.35), m.state.IsPlaying, position, m.flowFrame)
+	borderColor := computeRhythmBorderColor(LerpHex(topColor, borderBaseTone, 0.35), m.state.IsPlaying, position, m.zenFrame)
 	boxBorder := lipgloss.NewStyle().Foreground(lipgloss.Color(borderColor))
 
 	coverLines := m.getBigCoverLines(coverW, coverH)
 
 	// 4. Burning Fuse Progress Bar
 	barW := min(42, max(24, coverW))
-	fuseBar := renderBurningFuse(fraction, barW, m.state.IsPlaying, m.flowFrame, m.theme.Accent)
+	fuseBar := renderBurningFuse(fraction, barW, m.state.IsPlaying, m.zenFrame, m.theme.Accent)
 	padLeftBarW := max(0, (width-barW)/2)
 	padLeftBar := strings.Repeat(" ", padLeftBarW)
 
@@ -198,7 +178,7 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	for _, s := range zenStars {
 		sy := int(s.yRatio * float64(targetHeight))
 		sx := int(s.xRatio * float64(width))
-		twinkle := math.Sin(float64(m.flowFrame)*s.speed + s.phase)
+		twinkle := math.Sin(float64(m.zenFrame)*s.speed + s.phase)
 		if twinkle > 0.15 {
 			alpha := (twinkle - 0.15) / 0.85
 			starColor := s.color
@@ -220,21 +200,6 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 
 	// 6. Build lines
 	for y := 0; y < targetHeight; y++ {
-		t := float64(y) / float64(max(1, targetHeight-1))
-		var rowBg string
-		if m.bgMode == "flow" {
-			cycle := 60.0
-			sineVal := 0.5 + 0.5*math.Sin(2*math.Pi*float64(m.flowFrame)/cycle)
-			flowTop := LerpHex(topColor, secColor, sineVal)
-			waveShift := 0.08 * math.Sin(2*math.Pi*(float64(m.flowFrame)/cycle - t*0.8))
-			factor := min(1.0, max(0.0, t*1.35+waveShift))
-			rowBg = LerpHex(flowTop, bgBase, factor)
-		} else if m.bgMode == "dark" {
-			rowBg = bgBase
-		} else {
-			rowBg = LerpHex(topColor, bgBase, min(1.0, t*1.35))
-		}
-
 		contentRow := y - padTop
 		var lineContent string
 		contentStart, contentEnd := -1, -1
@@ -350,8 +315,12 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 			}
 		}
 
-		lines[y] = ApplyRowBackground(fit(lineContent), rowBg)
+		lines[y] = fit(lineContent)
 	}
+
+	// Paint the reactive canvas last so the scrim only lands on rows with content
+	// (the starry sky and empty margins keep the full animated gradient).
+	lines = canvas.PaintLines(lines)
 
 	view := tea.NewView(strings.Join(lines, "\n"))
 	view.AltScreen = true
@@ -470,6 +439,3 @@ func renderSweptText(text string, width int, globalProgress float64, baseStyle l
 	line := strings.Repeat(" ", pad) + renderedText
 	return line, pad, pad + totalW
 }
-
-
-

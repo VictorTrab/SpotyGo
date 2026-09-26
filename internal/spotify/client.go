@@ -44,7 +44,9 @@ type Album struct {
 }
 
 type Artist struct {
-	Name string `json:"name"`
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Genres []string `json:"genres"`
 }
 
 type Track struct {
@@ -259,6 +261,7 @@ type PlaybackState struct {
 type Client struct {
 	auth         *Auth
 	http         *http.Client
+	baseURL      string
 	mu           sync.Mutex
 	next         time.Time
 	blockedUntil time.Time
@@ -270,6 +273,14 @@ type Client struct {
 
 // Close cleans up resources if any.
 func (c *Client) Close() {}
+
+// base returns the API root, falling back to the public endpoint when unset.
+func (c *Client) base() string {
+	if c.baseURL == "" {
+		return apiBase
+	}
+	return c.baseURL
+}
 
 // IsBlocked reports whether Spotify rate limit backoff is currently active.
 func (c *Client) IsBlocked() bool {
@@ -289,6 +300,7 @@ func NewClient(auth *Auth) *Client {
 	return &Client{
 		auth:         auth,
 		http:         &http.Client{Timeout: 12 * time.Second},
+		baseURL:      apiBase,
 		trackCache:   make(map[string]Track),
 		diskCacheDir: cacheDir,
 	}
@@ -436,7 +448,7 @@ func (c *Client) request(ctx context.Context, method, path string, payload any, 
 			}
 			body = bytes.NewReader(data)
 		}
-		req, err := http.NewRequestWithContext(ctx, method, apiBase+path, body)
+		req, err := http.NewRequestWithContext(ctx, method, c.base()+path, body)
 		if err != nil {
 			return 0, err
 		}
@@ -502,6 +514,96 @@ func (c *Client) Playback(ctx context.Context) (PlaybackState, error) {
 	}
 	state.Available = status != http.StatusNoContent
 	return state, nil
+}
+
+// RecentlyPlayed returns the most recently played tracks, newest first.
+func (c *Client) RecentlyPlayed(ctx context.Context, limit int) ([]Track, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	query := url.Values{"limit": {strconv.Itoa(limit)}}
+	var result struct {
+		Items []struct {
+			Track Track `json:"track"`
+		} `json:"items"`
+	}
+	if _, err := c.request(ctx, http.MethodGet, "/me/player/recently-played?"+query.Encode(), nil, &result); err != nil {
+		return nil, err
+	}
+	tracks := make([]Track, 0, len(result.Items))
+	for _, item := range result.Items {
+		tracks = append(tracks, item.Track)
+	}
+	return tracks, nil
+}
+
+// ErrUnavailable marks a Spotify resource this application is not allowed to read.
+//
+// Spotify deprecated the audio-features/audio-analysis endpoints for apps in
+// development mode on 2024-11-27, so a 403 here is an expected outcome that
+// callers must degrade from instead of treating as a failure.
+var ErrUnavailable = errors.New("recurso no disponible para esta aplicación de Spotify")
+
+// UserProfile is the authenticated user's public profile.
+type UserProfile struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Country     string `json:"country"`
+	Product     string `json:"product"`
+}
+
+// Me returns the authenticated user's profile for account diagnostics.
+func (c *Client) Me(ctx context.Context) (UserProfile, error) {
+	var profile UserProfile
+	status, err := c.request(ctx, http.MethodGet, "/me", nil, &profile)
+	if status == http.StatusForbidden || status == http.StatusUnauthorized {
+		return profile, fmt.Errorf("%w (HTTP %d)", ErrUnavailable, status)
+	}
+	return profile, err
+}
+
+// AudioFeatures is Spotify's audio analysis report for a track.
+type AudioFeatures struct {
+	Energy           float64 `json:"energy"`
+	Valence          float64 `json:"valence"`
+	Tempo            float64 `json:"tempo"`
+	Danceability     float64 `json:"danceability"`
+	Acousticness     float64 `json:"acousticness"`
+	Instrumentalness float64 `json:"instrumentalness"`
+}
+
+// AudioFeatures fetches the mood/energy report for a track. It returns
+// ErrUnavailable when Spotify no longer grants access to the endpoint, which is
+// the expected result for development-mode applications.
+func (c *Client) AudioFeatures(ctx context.Context, trackID string) (AudioFeatures, error) {
+	var features AudioFeatures
+	id := strings.TrimPrefix(trackID, "spotify:track:")
+	if id == "" {
+		return features, errors.New("identificador de canción vacío")
+	}
+	status, err := c.request(ctx, http.MethodGet, "/audio-features/"+id, nil, &features)
+	if status == http.StatusForbidden || status == http.StatusNotFound {
+		return features, fmt.Errorf("%w (HTTP %d)", ErrUnavailable, status)
+	}
+	return features, err
+}
+
+// ArtistGenres returns the genres Spotify lists for an artist, used as a local
+// signal to estimate the mood of a track. Get Artist is not affected by the
+// 2024-11-27 deprecations.
+func (c *Client) ArtistGenres(ctx context.Context, artistID string) ([]string, error) {
+	var artist struct {
+		Genres []string `json:"genres"`
+	}
+	id := strings.TrimPrefix(artistID, "spotify:artist:")
+	if id == "" {
+		return nil, errors.New("identificador de artista vacío")
+	}
+	status, err := c.request(ctx, http.MethodGet, "/artists/"+id, nil, &artist)
+	if status == http.StatusForbidden || status == http.StatusNotFound {
+		return nil, fmt.Errorf("%w (HTTP %d)", ErrUnavailable, status)
+	}
+	return artist.Genres, err
 }
 
 func (c *Client) Devices(ctx context.Context) ([]Device, error) {

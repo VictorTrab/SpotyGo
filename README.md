@@ -38,13 +38,13 @@ El script se encarga de todo el proceso de forma 100% desatendida:
 ## Capturas de Pantalla
 
 ### Vista Principal (Reproductor TUI + Tarjeta Now-Playing + Playlists)
-Fondo degradado ambiental reactivo a la carátula, metadatos completos de álbum y año, barra de progreso y navegación por tus listas.
+Fondo degradado estático basado en la carátula, metadatos completos de álbum y año, barra de progreso y navegación por tus listas.
 
 <p align="center">
   <img src="assets/preview-main.png" alt="SpotifyGo Main View" width="850" />
 </p>
 
-### Modo Zen / Big Cover Art (`/art` o tecla `z`)
+### Modo Zen / Big Cover Art (tecla `z`)
 Visualización inmersiva con carátula TrueColor ampliada y cielo nocturno con estrellas titilantes en tiempo real.
 
 <p align="center">
@@ -55,10 +55,11 @@ Visualización inmersiva con carátula TrueColor ampliada y cielo nocturno con e
 
 ## Características Principales
 
-- **Reproducción Nativa de Alta Fidelidad (HQ 320k):** Motor de streaming integrado con soporte para 96k, 160k y 320k seleccionable en caliente mediante `/quality`.
+- **Reproducción Nativa de Alta Fidelidad (HQ 320k):** Motor de streaming integrado con calidad fija de 320k.
 - **Carátulas TrueColor en ANSI (`▀`):** Rasterizador de semibloques que despliega carátulas nítidas directamente en la terminal.
-- **Modo Zen Sanctuary (`z` o `/art`):** Experiencia minimalista con carátula ampliada y un cielo de estrellas vivas generadas proceduralmente.
-- **Fondo con Degradado Reactivo:** Iluminación dinámica que extrae los colores dominantes del álbum y baña la terminal suavemente (modos `gradient`, `flow`, `dark` y `transparent` mediante `/bg`).
+- **Modo Zen Sanctuary (`z`):** Experiencia minimalista con carátula ampliada y un cielo de estrellas vivas generadas proceduralmente.
+- **Fondos independientes por modo:** La interfaz normal es estática para evitar repintados decorativos; `gradient` usa los colores de la carátula y `dark` el fondo del tema. `flow` conserva su animación y solo se mueve en Zen, con su propio reloj; la paleta mantiene el contraste del texto (WCAG ≥ 4.5:1).
+- **Sincronización Remota Instantánea:** Sondeo adaptativo del estado de reproducción con sondeo de frontera y refresco al pulsar una tecla, de modo que una canción cambiada desde el teléfono aparece en segundos.
 - **Caché en 2 Niveles (0.0 ms):** Sistema de almacenamiento en memoria RAM y disco SSD para metadatos y carátulas. Cero llamadas redundantes y prevención de bloqueos HTTP 429.
 - **Eco-Power Zero-Idle:** Detección de foco de terminal (`xterm 1004h`). Cuando la ventana no está activa, el consumo de CPU desciende al **0.0%** sin detener la música.
 - **Navegación Fluida y Paleta de Comandos (`/`):** Control estilo Vim (`j`/`k`, `p`, `Space`), búsqueda difusa en tiempo real y buscador de comandos interactivo.
@@ -99,6 +100,19 @@ Para consultar la versión instalada:
 spotifygo version
 ```
 
+Para diagnosticar la cuenta, los permisos y el estado de la API (incluye si Spotify aún concede el análisis de audio):
+
+```bash
+spotifygo doctor
+```
+
+Para consultar o fijar el fondo desde la terminal, sin abrir la interfaz:
+
+```bash
+spotifygo background          # muestra el modo actual
+spotifygo background flow     # o gradient / dark
+```
+
 ---
 
 ## Controles y Atajos de Teclado
@@ -116,31 +130,22 @@ spotifygo version
 | `k` / `↑` | Mover cursor hacia arriba |
 | `Enter` | Abrir playlist seleccionada / Reproducir canción |
 | `Esc` | Volver a la vista de playlists / Cerrar modal |
-| `z` | Alternar Modo Zen (`/art`) con cielo estrellado |
+| `z` | Alternar Modo Zen con cielo estrellado |
 | `S` | Búsqueda directa de canciones |
 | `/` o `?` | Abrir Paleta de Comandos interactiva |
 | `q` / `Ctrl+C` | Salir de SpotifyGo |
 
-### Comandos Rápidos (`/`)
-Escribe `/` en cualquier momento para desplegar la paleta de comandos interactiva:
+### Comandos de la Paleta (`/`)
+Escribe `/` para acceder a las acciones que no tienen un atajo directo en el footer:
 
-- `/play` — Reanuda la reproducción.
-- `/pause` — Pausa la reproducción.
-- `/next` — Salta a la siguiente pista.
-- `/prev` — Vuelve a la pista anterior.
-- `/playlists` — Muestra tus playlists guardadas.
-- `/search <query>` — Búsqueda instantánea de pistas o artistas en Spotify.
-- `/art` — Alterna la vista Zen con carátula en alta definición y cielo estrellado.
-- `/bg <modo>` — Cambia el modo de fondo (`default`, `flow`, `dark`).
-- `/theme` — Selector de temas de color (`Spotify`, `Synthwave`, `Tokyo Night`, `Nord`).
-- `/quality <bitrate>` — Calidad de audio (`320k` alta, `160k` media, `96k` baja).
-- `/devices` — Lista y selector de dispositivos Spotify Connect disponibles.
-- `/volume <0-100>` — Ajusta el volumen de reproducción.
-- `/version` — Muestra la versión actual instalada.
-- `/changelog` — Muestra un resumen de las novedades y cambios de las versiones recientes.
+- `/background [flow|gradient|dark]` (alias `/bg`) — Cambia el estilo de fondo.
+- `/login` — Inicia sesión o cambia la cuenta de Spotify.
 - `/update` — Comprueba e instala la última actualización disponible.
-- `/help` — Muestra la lista de comandos y atajos disponibles.
-- `/quit` — Cierra SpotifyGo.
+- `/changelog` — Muestra las novedades y cambios recientes.
+- `/version` — Muestra la versión instalada.
+- `/help` — Muestra los atajos de teclado y los comandos de esta paleta.
+
+La reproducción, búsqueda, playlists, dispositivos, volumen, temas, modo Zen y salida se controlan desde sus atajos de teclado y no se duplican en esta paleta.
 
 ---
 

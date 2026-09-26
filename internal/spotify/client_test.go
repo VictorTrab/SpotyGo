@@ -1,10 +1,110 @@
 package spotify
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+// newTestClient wires a client against a stub API so HTTP behaviour can be
+// asserted without touching the real Spotify endpoints.
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	auth := NewAuth(DefaultClientID)
+	auth.token = savedToken{
+		AccessToken: "test-token",
+		Scopes:      scopes,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}
+	auth.loaded = true
+
+	client := NewClient(auth)
+	client.http = server.Client()
+	client.baseURL = server.URL + "/v1"
+	return client
+}
+
+func TestMeReturnsDisplayName(t *testing.T) {
+	var path string
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"victor","display_name":"Víctor","country":"MX","product":"premium"}`))
+	})
+
+	profile, err := client.Me(t.Context())
+	if err != nil {
+		t.Fatalf("Me returned an error: %v", err)
+	}
+	if path != "/v1/me" {
+		t.Fatalf("expected GET /v1/me, got %s", path)
+	}
+	if profile.DisplayName != "Víctor" || profile.ID != "victor" {
+		t.Fatalf("unexpected profile: %+v", profile)
+	}
+}
+
+func TestAudioFeaturesReportsUnavailableOn403(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/audio-features/track123" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"status":403,"message":"Forbidden"}}`))
+	})
+
+	if _, err := client.AudioFeatures(t.Context(), "spotify:track:track123"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable for a 403, got %v", err)
+	}
+}
+
+func TestAudioFeaturesParsesRealPayload(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"energy":0.81,"valence":0.42,"tempo":124.5,"danceability":0.7}`))
+	})
+
+	features, err := client.AudioFeatures(t.Context(), "spotify:track:abc")
+	if err != nil {
+		t.Fatalf("AudioFeatures returned an error: %v", err)
+	}
+	if features.Energy != 0.81 || features.Valence != 0.42 || features.Tempo != 124.5 {
+		t.Fatalf("unexpected features: %+v", features)
+	}
+}
+
+func TestArtistGenres(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/artists/artist123" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"artist123","name":"Nobu Woods","genres":["indie soul","chillhop"]}`))
+	})
+
+	genres, err := client.ArtistGenres(t.Context(), "spotify:artist:artist123")
+	if err != nil {
+		t.Fatalf("ArtistGenres returned an error: %v", err)
+	}
+	if len(genres) != 2 || genres[0] != "indie soul" {
+		t.Fatalf("unexpected genres: %v", genres)
+	}
+}
+
+func TestArtistGenresUnavailableOn403(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+
+	if _, err := client.ArtistGenres(t.Context(), "artist123"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable for a 403, got %v", err)
+	}
+}
 
 func TestAuthScopes(t *testing.T) {
 	full := "user-read-playback-state user-modify-playback-state user-read-currently-playing streaming app-remote-control playlist-read-private playlist-read-collaborative user-library-read user-read-recently-played user-top-read"

@@ -12,112 +12,40 @@ type CommandDef struct {
 
 var registeredCommands = []CommandDef{
 	{
-		Name:        "search",
-		Aliases:     []string{"s", "find"},
-		Description: "Search tracks or artists on Spotify",
-		Action:      "search",
-	},
-	{
-		Name:        "play",
-		Aliases:     []string{"p", "resume"},
-		Description: "Resume or toggle playback",
-		Action:      "play",
-	},
-	{
-		Name:        "pause",
-		Aliases:     []string{"stop"},
-		Description: "Pause playback",
-		Action:      "pause",
-	},
-	{
-		Name:        "next",
-		Aliases:     []string{"n", "skip"},
-		Description: "Skip to next track",
-		Action:      "next",
-	},
-	{
-		Name:        "prev",
-		Aliases:     []string{"previous", "b", "back"},
-		Description: "Play previous track",
-		Action:      "prev",
-	},
-	{
-		Name:        "playlists",
-		Aliases:     []string{"pl", "list"},
-		Description: "View saved playlists",
-		Action:      "playlists",
-	},
-	{
-		Name:        "devices",
-		Aliases:     []string{"dev", "d"},
-		Description: "Spotify Connect devices",
-		Action:      "devices",
-	},
-	{
-		Name:        "volume",
-		Aliases:     []string{"vol", "v"},
-		Description: "Set playback volume (e.g. /volume 80)",
-		Action:      "volume",
-	},
-	{
-		Name:        "theme",
-		Aliases:     []string{"th", "t"},
-		Description: "Change color theme",
-		Action:      "theme",
-	},
-	{
 		Name:        "background",
 		Aliases:     []string{"bg"},
-		Description: "Background style (default / flow / dark)",
+		Description: "Cambiar fondo; flow solo se anima en modo Zen (gradient o dark en modo normal)",
 		Action:      "background",
-	},
-	{
-		Name:        "art",
-		Aliases:     []string{"cover", "zen", "c", "z"},
-		Description: "High-resolution album art in Zen mode",
-		Action:      "art",
-	},
-	{
-		Name:        "quality",
-		Aliases:     []string{"bitrate", "ql"},
-		Description: "Audio bitrate (320k high / 160k normal / 96k low)",
-		Action:      "quality",
 	},
 	{
 		Name:        "login",
 		Aliases:     []string{"auth"},
-		Description: "Authenticate or change Spotify account",
+		Description: "Iniciar sesión o cambiar cuenta de Spotify",
 		Action:      "login",
-	},
-	{
-		Name:        "help",
-		Aliases:     []string{"h", "?"},
-		Description: "Show available commands and shortcuts",
-		Action:      "help",
-	},
-	{
-		Name:        "version",
-		Aliases:     []string{"v", "about"},
-		Description: "Show installed SpotifyGo version",
-		Action:      "version",
 	},
 	{
 		Name:        "update",
 		Aliases:     []string{"upgrade"},
-		Description: "Check and apply updates from GitHub",
+		Description: "Buscar e instalar actualizaciones desde GitHub",
 		Action:      "update",
 	},
 	{
 		Name:        "changelog",
-		Aliases:     []string{"news", "whatsnew", "recent"},
-		Description: "Show summary of what's new in recent updates",
+		Aliases:     []string{"news", "whatsnew"},
+		Description: "Ver las novedades y cambios recientes",
 		Action:      "changelog",
 	},
 	{
-		Name:        "quit",
-		Aliases:     []string{"q", "exit"},
-		Description: "Close SpotifyGo",
-		Action:      "quit",
+		Name:        "version",
+		Aliases:     []string{"about", "v"},
+		Description: "Mostrar versión instalada e información de SpotyGo",
+		Action:      "version",
+	},
+	{
+		Name:        "help",
+		Aliases:     []string{"h", "?"},
+		Description: "Ver guía de atajos de teclado y ayuda",
+		Action:      "help",
 	},
 }
 
@@ -137,16 +65,11 @@ func FilterCommands(input string) []CommandDef {
 			matches = append(matches, cmd)
 			continue
 		}
-		matchedAlias := false
 		for _, alias := range cmd.Aliases {
 			if strings.HasPrefix(alias, head) {
 				matches = append(matches, cmd)
-				matchedAlias = true
 				break
 			}
-		}
-		if !matchedAlias && (strings.Contains(cmd.Name, head) || strings.Contains(strings.ToLower(cmd.Description), head)) {
-			matches = append(matches, cmd)
 		}
 	}
 	return matches

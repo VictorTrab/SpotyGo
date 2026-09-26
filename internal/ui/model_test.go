@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/VictorTrab/SpotyGo/internal/player"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
 	"github.com/VictorTrab/SpotyGo/internal/theme"
@@ -90,18 +88,22 @@ func TestSpaceIgnoresDuplicateAndOldState(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	m.state = spotify.PlaybackState{Available: true, IsPlaying: true}
 	m = pressSpace(m)
-	if !m.transportBusy || m.state.IsPlaying || m.desiredPlaying == nil || *m.desiredPlaying {
+	if !m.transportBusy || m.desiredPlaying == nil || *m.desiredPlaying {
 		t.Fatal("first space must request a pause")
+	}
+	next, _ := m.Update(actionMsg{name: "pausar"})
+	m = next.(Model)
+	if m.state.IsPlaying {
+		t.Fatal("confirmed pause action must set isPlaying to false")
 	}
 	old, _ := m.Update(stateMsg{state: spotify.PlaybackState{Available: true, IsPlaying: true}, epoch: 0})
 	m = old.(Model)
 	if m.state.IsPlaying {
 		t.Fatal("old playback response replaced the pending pause")
 	}
-	next, _ := m.Update(actionMsg{name: "pausar"})
-	m = pressSpace(next.(Model))
-	if m.state.IsPlaying || m.transportBusy {
-		t.Fatal("duplicate space must not resume playback")
+	m = pressSpace(m)
+	if m.state.IsPlaying {
+		t.Fatal("duplicate space must not resume playback while busy")
 	}
 }
 
@@ -131,16 +133,22 @@ func TestCommandModeAndPrefixResolutions(t *testing.T) {
 		t.Fatal("pressing / must activate command mode")
 	}
 
-	// Type 'q' and press Enter -> should quit
+	// Footer-only 'q' must not remain as a hidden slash command.
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'q', Text: "q"}))
 	m = next.(Model)
 	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if cmd == nil {
-		t.Fatal("q command must return tea.Quit command")
+	if cmd != nil {
+		t.Fatal("unknown slash command should not execute a hidden action")
 	}
 	m = next.(Model)
+	if !m.statusError || !strings.Contains(m.status, "no existe") {
+		t.Fatalf("expected q to be reported as an unavailable slash command, got %q", m.status)
+	}
+	if matches := FilterCommands("th"); len(matches) != 0 {
+		t.Fatalf("description substring must not expose unrelated commands: %+v", matches)
+	}
 
-	// Press '/' again, type 'th' and press Enter -> should switch to viewThemePicker
+	// Theme selection is available from the footer, not as a redundant slash command.
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	m = next.(Model)
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 't', Text: "t"}))
@@ -149,11 +157,11 @@ func TestCommandModeAndPrefixResolutions(t *testing.T) {
 	m = next.(Model)
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	m = next.(Model)
-	if m.currentView != viewThemePicker {
-		t.Fatalf("expected viewThemePicker, got %v", m.currentView)
+	if m.currentView != viewPlaylists || !m.statusError {
+		t.Fatalf("expected unavailable /theme to leave the current view unchanged, got view=%v status=%q", m.currentView, m.status)
 	}
 
-	// Press Esc to cancel theme picker
+	// Esc leaves the normal view unchanged after the unknown command.
 	next, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	m = next.(Model)
 	if m.currentView != viewPlaylists {
@@ -227,7 +235,7 @@ func TestNextAndPreviousTrackHotkeys(t *testing.T) {
 	// Press 'n' -> next track
 	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}))
 	m = next.(Model)
-	if cmd == nil || !m.transportBusy || !strings.Contains(m.status, "Siguiente") {
+	if cmd == nil || !m.transportBusy || m.status != statusNext {
 		t.Fatal("n must trigger next track")
 	}
 
@@ -235,7 +243,7 @@ func TestNextAndPreviousTrackHotkeys(t *testing.T) {
 	// Press 'b' -> previous track
 	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'b', Text: "b"}))
 	m = next.(Model)
-	if cmd == nil || !m.transportBusy || !strings.Contains(m.status, "anterior") {
+	if cmd == nil || !m.transportBusy || m.status != statusPrev {
 		t.Fatal("b must trigger previous track")
 	}
 }
@@ -315,7 +323,7 @@ func TestArrowKeysNextAndPrevious(t *testing.T) {
 	// Press 'right' -> next track
 	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Text: "right"}))
 	m = next.(Model)
-	if cmd == nil || !m.transportBusy || !strings.Contains(m.status, "Siguiente") {
+	if cmd == nil || !m.transportBusy || m.status != statusNext {
 		t.Fatal("right arrow must trigger next track")
 	}
 
@@ -323,56 +331,25 @@ func TestArrowKeysNextAndPrevious(t *testing.T) {
 	// Press 'left' -> previous track
 	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft, Text: "left"}))
 	m = next.(Model)
-	if cmd == nil || !m.transportBusy || !strings.Contains(m.status, "anterior") {
+	if cmd == nil || !m.transportBusy || m.status != statusPrev {
 		t.Fatal("left arrow must trigger previous track")
 	}
 }
 
-func TestQualityCommandAndHotRestart(t *testing.T) {
+func TestDefaultBitrateFixedTo320(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
-	restartedWith := ""
-	m.SetEngineRestarter(func(b string) error {
-		restartedWith = b
-		return nil
-	})
-
-	// Enter command mode and execute "/ quality 160"
-	m.commandActive = true
-	m.commandInput = "quality 160"
-	next, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = next.(Model)
-	if m.bitrate != "160" {
-		t.Fatalf("expected bitrate 160, got %s", m.bitrate)
-	}
-	if !strings.Contains(m.status, "160 kbps") {
-		t.Fatalf("expected status mentioning 160 kbps, got %s", m.status)
-	}
-	if cmd == nil {
-		t.Fatal("expected async restart command")
-	}
-	msg := cmd()
-	if restartMsg, ok := msg.(engineRestartMsg); !ok || restartMsg.bitrate != "160" {
-		t.Fatalf("expected engineRestartMsg with 160, got %#v", msg)
-	}
-	if restartedWith != "160" {
-		t.Fatalf("expected restarter called with 160, got %s", restartedWith)
-	}
-
-	// Now switch back to 320 with "/ quality high"
-	m.commandActive = true
-	m.commandInput = "quality high"
-	next, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = next.(Model)
 	if m.bitrate != "320" {
-		t.Fatalf("expected bitrate 320, got %s", m.bitrate)
+		t.Fatalf("expected default bitrate 320, got %s", m.bitrate)
 	}
-	_ = cmd()
-	if restartedWith != "320" {
-		t.Fatalf("expected restarter called with 320, got %s", restartedWith)
+
+	// Verify quality is removed from command palette
+	cmds := FilterCommands("quality")
+	if len(cmds) > 0 {
+		t.Fatalf("expected quality command to be removed, found %d matches", len(cmds))
 	}
 }
 
-func TestSimplifiedHeaderAndQualityBadge(t *testing.T) {
+func TestSimplifiedHeaderWithoutQualityBadge(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	vol := 60
 	m.state = spotify.PlaybackState{
@@ -385,23 +362,168 @@ func TestSimplifiedHeaderAndQualityBadge(t *testing.T) {
 	if !strings.Contains(view.Content, "💻 PC") {
 		t.Fatalf("header must contain simplified badge '💻 PC', got:\n%s", view.Content)
 	}
-	if !strings.Contains(view.Content, "HQ 320k") {
-		t.Fatalf("header must contain quality badge 'HQ 320k', got:\n%s", view.Content)
+	if strings.Contains(view.Content, "HQ 320k") || strings.Contains(view.Content, "MQ 160k") {
+		t.Fatalf("header must NOT contain quality badge, got:\n%s", view.Content)
 	}
 
-	// Change to mobile device and 160k
+	// Change to mobile device
 	m.state.Device = &spotify.Device{ID: "phone", Name: "iPhone", Type: "Smartphone", VolumePercent: &vol}
-	m.bitrate = "160"
 	view = m.View()
 	if !strings.Contains(view.Content, "📱 Móvil") {
 		t.Fatalf("header must contain '📱 Móvil' for phone, got:\n%s", view.Content)
 	}
-	if !strings.Contains(view.Content, "MQ 160k") {
-		t.Fatalf("header must contain 'MQ 160k' for 160 bitrate, got:\n%s", view.Content)
+}
+
+func TestPollDelayAdaptsToPlaybackState(t *testing.T) {
+	phone := &spotify.Device{ID: "phone", Name: "iPhone"}
+	local := &spotify.Device{ID: "pc", Name: "PC"}
+
+	playing := func(device *spotify.Device, durationMS, progressMS int) Model {
+		m := New(nil, "PC", nil, nil)
+		m.state = spotify.PlaybackState{
+			Available:  true,
+			IsPlaying:  true,
+			ProgressMS: progressMS,
+			Item:       &spotify.Track{URI: "spotify:track:x", DurationMS: durationMS},
+			Device:     device,
+		}
+		m.lastSync = time.Now()
+		return m
+	}
+
+	if d := playing(phone, 200000, 0).pollDelay(); d != remotePollCeiling {
+		t.Fatalf("mid-track remote playback must fall back to the remote ceiling, got %s", d)
+	}
+	if d := playing(phone, 2000, 0).pollDelay(); d != 4*time.Second {
+		t.Fatalf("near the end of a remote track the poll must land just past it, got %s", d)
+	}
+	if d := playing(phone, 1000, 1000).pollDelay(); d != minPollDelay {
+		t.Fatalf("a finished remote track must be re-checked at the floor, got %s", d)
+	}
+	if d := playing(local, 200000, 0).pollDelay(); d != localPollCeiling {
+		t.Fatalf("local playback keeps librespot events, so it may poll slower, got %s", d)
+	}
+	if d := playing(local, 1000, 1000).pollDelay(); d != 6*time.Second {
+		t.Fatalf("local boundary polls must stay inside the local floor, got %s", d)
+	}
+
+	paused := playing(phone, 200000, 0)
+	paused.state.IsPlaying = false
+	if d := paused.pollDelay(); d != pausedDelay {
+		t.Fatalf("paused playback should poll lazily, got %s", d)
+	}
+
+	unknown := New(nil, "PC", nil, nil)
+	if d := unknown.pollDelay(); d != unknownDelay {
+		t.Fatalf("unknown state should retry quickly, got %s", d)
+	}
+
+	blurred := playing(phone, 2000, 0)
+	blurred.isFocused = false
+	if d := blurred.pollDelay(); d != unfocusedDelay {
+		t.Fatalf("an unfocused window must throttle polling, got %s", d)
+	}
+
+	// Regression guard: the old scheduler refreshed only every 4th 25s tick (100s)
+	// whenever the local device was the active one.
+	if d := playing(local, 200000, 0).pollDelay(); d > 25*time.Second {
+		t.Fatalf("local playback must never wait anywhere near the old 100s gap, got %s", d)
 	}
 }
 
-func TestLocalActiveSuppressesPoll(t *testing.T) {
+func TestPollAtTrackBoundaryProbesAtMostTwice(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.state = spotify.PlaybackState{
+		Available:  true,
+		IsPlaying:  true,
+		ProgressMS: 1000,
+		Item:       &spotify.Track{URI: "spotify:track:x", DurationMS: 1000},
+		Device:     &spotify.Device{ID: "phone", Name: "iPhone"},
+	}
+	m.lastSync = time.Now()
+
+	if !m.atTrackBoundary() {
+		t.Fatal("a track at its end must be reported as a boundary")
+	}
+	for want := 1; want <= maxBoundaryProbes; want++ {
+		next, cmd := m.Update(pollMsg{})
+		m = next.(Model)
+		if cmd == nil {
+			t.Fatal("boundary probe must schedule a refresh")
+		}
+		if m.boundaryProbes != want {
+			t.Fatalf("expected %d boundary probes, got %d", want, m.boundaryProbes)
+		}
+	}
+	next, _ := m.Update(pollMsg{})
+	m = next.(Model)
+	if m.boundaryProbes != maxBoundaryProbes {
+		t.Fatalf("boundary probes must stay capped at %d, got %d", maxBoundaryProbes, m.boundaryProbes)
+	}
+}
+
+func TestRemoteTrackChangeResetsBoundaryProbes(t *testing.T) {
+	phone := &spotify.Device{ID: "phone", Name: "iPhone"}
+	m := New(nil, "PC", nil, nil)
+	m.state = spotify.PlaybackState{
+		Available:  true,
+		IsPlaying:  true,
+		ProgressMS: 1000,
+		Item:       &spotify.Track{URI: "spotify:track:old", DurationMS: 1000},
+		Device:     phone,
+	}
+	m.boundaryProbes = maxBoundaryProbes
+
+	next, _ := m.Update(stateMsg{
+		epoch: m.stateEpoch,
+		state: spotify.PlaybackState{
+			Available: true,
+			IsPlaying: true,
+			Item:      &spotify.Track{URI: "spotify:track:new", DurationMS: 180000},
+			Device:    phone,
+		},
+	})
+	m = next.(Model)
+	if m.state.Item == nil || m.state.Item.URI != "spotify:track:new" {
+		t.Fatal("a remote track change must be adopted")
+	}
+	if m.boundaryProbes != 0 {
+		t.Fatalf("a new track must reset boundary probing, got %d", m.boundaryProbes)
+	}
+}
+
+func TestKeyPressRefreshesStalePlaybackState(t *testing.T) {
+	client := spotify.NewClient(nil)
+
+	stale := New(client, "PC", nil, nil)
+	stale.lastStateFetch = time.Now().Add(-4 * time.Second)
+	next, cmd := stale.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	stale = next.(Model)
+	if cmd == nil {
+		t.Fatal("a keystroke on a stale state must request a refresh")
+	}
+	if !stale.stateFetching {
+		t.Fatal("the refresh must be marked in flight so it is not duplicated")
+	}
+
+	fresh := New(client, "PC", nil, nil)
+	fresh.lastStateFetch = time.Now()
+	next, _ = fresh.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	fresh = next.(Model)
+	if fresh.stateFetching {
+		t.Fatal("a fresh state must not trigger an extra request on every keystroke")
+	}
+
+	quit := New(client, "PC", nil, nil)
+	quit.lastStateFetch = time.Now().Add(-4 * time.Second)
+	next, _ = quit.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	quit = next.(Model)
+	if quit.stateFetching {
+		t.Fatal("quitting must not fire a playback refresh")
+	}
+}
+
+func TestLocalActivePollsAsSafetyNet(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	m.localReady = true
 	m.state = spotify.PlaybackState{
@@ -413,11 +535,15 @@ func TestLocalActiveSuppressesPoll(t *testing.T) {
 		t.Fatal("isLocalActive must return true when active device matches localName")
 	}
 
-	// On pollMsg, it should only return poll() (the tick), NOT fetchState()
+	// The scheduler must still produce a tick, and one that stays close enough to
+	// recover from a missed librespot event.
 	next, cmd := m.Update(pollMsg{})
 	_ = next.(Model)
 	if cmd == nil {
 		t.Fatal("expected poll tick cmd")
+	}
+	if d := m.pollDelay(); d > localPollCeiling {
+		t.Fatalf("local polling must remain a safety net, got %s", d)
 	}
 }
 
@@ -431,10 +557,13 @@ func TestPlayPauseImmediateOptimisticAndStaleProtection(t *testing.T) {
 	}
 	m.lastSync = time.Now().Add(-1 * time.Second)
 
-	// 1. User presses Space to Pause
+	// 1. User presses Space to Pause: UI keeps playing while waiting for Spotify API
 	m = pressSpace(m)
-	if m.state.IsPlaying {
-		t.Fatal("optimistic state must immediately show paused")
+	if !m.state.IsPlaying {
+		t.Fatal("player must remain playing until Spotify API confirms pause")
+	}
+	if !m.transportBusy {
+		t.Fatal("transportBusy must be set while waiting for pause response")
 	}
 	if m.desiredPlaying == nil || *m.desiredPlaying != false {
 		t.Fatal("desiredPlaying must be set to false")
@@ -442,12 +571,14 @@ func TestPlayPauseImmediateOptimisticAndStaleProtection(t *testing.T) {
 	if m.status != "" {
 		t.Fatalf("status should be clean on pause, got: %q", m.status)
 	}
-
-	// 2. Action completes successfully
+	// 2. Action completes successfully: Spotify API confirmed pause
 	next, _ := m.Update(actionMsg{name: "pausar"})
 	m = next.(Model)
 	if m.transportBusy {
 		t.Fatal("transportBusy must be cleared once action completes")
+	}
+	if m.state.IsPlaying {
+		t.Fatal("state must transition to paused once Spotify API responds")
 	}
 	if m.status != "" {
 		t.Fatalf("status should remain clean, got: %q", m.status)
@@ -472,21 +603,27 @@ func TestPlayPauseImmediateOptimisticAndStaleProtection(t *testing.T) {
 		t.Fatalf("paused progress must remain pinned at %d, got %d", savedPos, m.state.ProgressMS)
 	}
 
-	// 4. User resumes after 250ms
+	// 4. User resumes after 250ms: UI waits for Spotify API to avoid desynchronization/rewind
 	m.lastTransport = time.Now().Add(-250 * time.Millisecond)
 	m = pressSpace(m)
-	if !m.state.IsPlaying {
-		t.Fatal("optimistic state must immediately show playing")
+	if m.state.IsPlaying {
+		t.Fatal("player must remain waiting until Spotify API responds")
+	}
+	if !m.transportBusy {
+		t.Fatal("transportBusy must be true while waiting for resume response")
 	}
 	if m.desiredPlaying == nil || *m.desiredPlaying != true {
 		t.Fatal("desiredPlaying must be set to true")
 	}
 
-	// 5. Resume action completes
+	// 5. Resume action completes (API responded!) -> starts playing and syncs clock
 	next, _ = m.Update(actionMsg{name: "reproducir"})
 	m = next.(Model)
 	if m.transportBusy {
 		t.Fatal("transportBusy must be cleared after resume action")
+	}
+	if !m.state.IsPlaying {
+		t.Fatal("state must transition to playing once Spotify API responds")
 	}
 
 	// 6. Stale Spotify Web API response returns IsPlaying: false
@@ -523,20 +660,101 @@ func TestPlayPauseImmediateOptimisticAndStaleProtection(t *testing.T) {
 	}
 }
 
+func TestLocalDevicePauseRemainsPausedAndDoesNotCountSeconds(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+	m.state = spotify.PlaybackState{
+		Available:  true,
+		IsPlaying:  true,
+		ProgressMS: 46000,
+		Item: &spotify.Track{
+			Name:       "Lovely",
+			URI:        "spotify:track:lovely123",
+			DurationMS: 291000,
+		},
+		Device: &spotify.Device{
+			Name: "PC",
+			Type: "Computer",
+			ID:   "pc-dev",
+		},
+	}
+	m.lastSync = time.Now()
+
+	if !m.isLocalActive() {
+		t.Fatal("expected local device to be active")
+	}
+
+	// 1. User pauses via Space: waits for API to avoid desync
+	m = pressSpace(m)
+	if !m.state.IsPlaying {
+		t.Fatal("player must remain playing until Spotify API responds")
+	}
+	if !m.transportBusy {
+		t.Fatal("transportBusy must be set while waiting for pause")
+	}
+
+	// 2. Pause action completes
+	next, _ := m.Update(actionMsg{name: "pausar"})
+	m = next.(Model)
+	if m.state.IsPlaying {
+		t.Fatal("player must pause once action completes")
+	}
+
+	// 3. Spotify state arrives confirming playback is paused on local device
+	next, _ = m.Update(stateMsg{
+		epoch: m.stateEpoch,
+		state: spotify.PlaybackState{
+			Available:  true,
+			IsPlaying:  false, // Spotify confirmed paused!
+			ProgressMS: 46000,
+			Item: &spotify.Track{
+				Name:       "Lovely",
+				URI:        "spotify:track:lovely123",
+				DurationMS: 291000,
+			},
+			Device: &spotify.Device{
+				Name: "PC",
+				Type: "Computer",
+				ID:   "pc-dev",
+			},
+		},
+	})
+	m = next.(Model)
+
+	if m.state.IsPlaying {
+		t.Fatal("state must remain paused when Spotify confirmed paused on local device")
+	}
+
+	// 4. Progress must NOT advance even if time passes
+	m.lastSync = time.Now().Add(-10 * time.Second)
+	if got := m.currentPositionMS(); got != 46000 {
+		t.Fatalf("expected progress to stay at 46000ms while paused, got %d", got)
+	}
+
+	// 5. View must display pause icon ⏸ and NOT play icon ▶
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "⏸") {
+		t.Fatal("view must render pause icon ⏸ when paused")
+	}
+	if strings.Contains(content, "▶ 00:46") {
+		t.Fatal("view must NOT show play icon ▶ 00:46 while paused")
+	}
+}
+
 func TestPlayPauseErrorReversion(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	m.state = spotify.PlaybackState{Available: true, IsPlaying: true}
 
 	m = pressSpace(m)
-	if m.state.IsPlaying {
-		t.Fatal("optimistic state should be paused")
+	if !m.transportBusy || !m.state.IsPlaying {
+		t.Fatal("player should remain playing and busy until response")
 	}
 
 	// Network error on pause
 	next, _ := m.Update(actionMsg{name: "pausar", err: errors.New("timeout connecting to Spotify")})
 	m = next.(Model)
 	if !m.state.IsPlaying {
-		t.Fatal("state must revert to playing on error")
+		t.Fatal("state must remain playing on error")
 	}
 	if m.desiredPlaying != nil {
 		t.Fatal("desiredPlaying must be nil after error")
@@ -706,7 +924,7 @@ func TestNowPlayingCardWithCoverData(t *testing.T) {
 
 func TestBackgroundCommandAndModes(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
-	m.bgMode = "default"
+	m.bgMode = "flow"
 
 	// 1. Typing /background without args opens viewBgPicker modal
 	m = pressKey(m, "/")
@@ -719,22 +937,30 @@ func TestBackgroundCommandAndModes(t *testing.T) {
 		t.Fatalf("expected viewBgPicker, got %d", m.currentView)
 	}
 
-	// 2. Navigating modal down: option 0 (default) -> option 1 (flow)
-	m = pressKey(m, "down")
-	if m.bgPickerSelected != 1 || m.bgMode != "flow" {
-		t.Fatalf("expected option 1 (flow), got pick=%d, mode=%q", m.bgPickerSelected, m.bgMode)
+	// 2. Flow is the first option and the one selected on open.
+	if m.bgPickerSelected != 0 || m.bgMode != "flow" {
+		t.Fatalf("expected flow preselected as option 0, got pick=%d, mode=%q", m.bgPickerSelected, m.bgMode)
 	}
 
-	// 3. Confirming with enter saves flow and returns to previous view
+	// 3. Navigating down lands on gradient and previews it live.
+	m = pressKey(m, "down")
+	if m.bgPickerSelected != 1 || m.bgMode != "gradient" {
+		t.Fatalf("expected option 1 (gradient), got pick=%d, mode=%q", m.bgPickerSelected, m.bgMode)
+	}
+
+	// 4. Confirming with enter saves gradient and returns to the previous view.
 	m = pressKey(m, "enter")
 	if m.currentView != viewPlaylists {
 		t.Fatalf("expected viewPlaylists after confirm, got %d", m.currentView)
 	}
-	if m.bgMode != "flow" {
-		t.Fatalf("expected bgMode 'flow', got %q", m.bgMode)
+	if m.bgMode != "gradient" {
+		t.Fatalf("expected bgMode 'gradient', got %q", m.bgMode)
+	}
+	if !strings.Contains(m.toastMessage, "gradient") {
+		t.Fatalf("expected a friendly gradient toast, got %q", m.toastMessage)
 	}
 
-	// 4. Direct command /background dark
+	// 5. Direct command /background dark
 	m = pressKey(m, "/")
 	for _, c := range "background dark" {
 		m = pressKey(m, string(c))
@@ -745,15 +971,15 @@ func TestBackgroundCommandAndModes(t *testing.T) {
 		t.Fatalf("expected bgMode 'dark', got %q", m.bgMode)
 	}
 
-	// 5. Direct command /bg default
+	// 6. Direct command /bg default (legacy alias for gradient)
 	m = pressKey(m, "/")
 	for _, c := range "bg default" {
 		m = pressKey(m, string(c))
 	}
 	m = pressKey(m, "enter")
 
-	if m.bgMode != "default" {
-		t.Fatalf("expected bgMode 'default', got %q", m.bgMode)
+	if m.bgMode != "gradient" {
+		t.Fatalf("expected the legacy 'default' alias to map to gradient, got %q", m.bgMode)
 	}
 }
 
@@ -773,11 +999,11 @@ func TestEcoPowerZeroIdle(t *testing.T) {
 		t.Fatal("expected nil cmd on BlurMsg to stop scheduling")
 	}
 
-	// 2. Spinner tick while unfocused must return nil (0% CPU, tick loop frozen)
-	res, tickCmd := m.Update(spinner.TickMsg{})
+	// 2. A stale playback tick while unfocused must not restart a timer.
+	res, tickCmd := m.Update(playbackTickMsg{epoch: m.playbackClockEpoch})
 	m = res.(Model)
-	if tickCmd != nil {
-		t.Fatal("expected tickCmd to be nil while unfocused to guarantee 0% CPU")
+	if tickCmd != nil || m.playbackTickScheduled {
+		t.Fatal("playback clock must remain stopped while unfocused")
 	}
 
 	// 3. Intro tick while unfocused must also return nil
@@ -786,6 +1012,8 @@ func TestEcoPowerZeroIdle(t *testing.T) {
 	if introCmd != nil {
 		t.Fatal("expected introCmd to be nil while unfocused")
 	}
+	m.introActive = false
+	m.setView(viewPlaylists)
 
 	// 4. Terminal regains focus (User switches back to SpotifyGo)
 	res, focusCmd := m.Update(tea.FocusMsg{})
@@ -793,9 +1021,10 @@ func TestEcoPowerZeroIdle(t *testing.T) {
 	if !m.isFocused {
 		t.Fatal("expected isFocused to be true after FocusMsg")
 	}
-	if focusCmd == nil {
-		t.Fatal("expected non-nil focusCmd to resume animations immediately")
+	if !m.isFocused || m.playbackTickScheduled || m.zenTickScheduled {
+		t.Fatal("focus must not start a decorative animation clock while idle")
 	}
+	_ = focusCmd // fetchState may request a remote refresh; it is not an animation timer.
 
 	// 5. Toast trigger and expiration
 	m.setView(viewPlaylists)
@@ -809,10 +1038,8 @@ func TestEcoPowerZeroIdle(t *testing.T) {
 	}
 
 	// Decrement toast
-	for i := 0; i < 3; i++ {
-		res, _ := m.Update(spinner.TickMsg{})
-		m = res.(Model)
-	}
+	res, _ = m.Update(toastExpireMsg{seq: m.toastSeq})
+	m = res.(Model)
 	if m.toastMessage != "" || m.toastTimer != 0 {
 		t.Fatalf("expected toast message expired, got %q, timer=%d", m.toastMessage, m.toastTimer)
 	}
@@ -906,21 +1133,21 @@ func TestIntroAnimationAndSkip(t *testing.T) {
 	}
 }
 
-func TestCommandPaletteNavigationAndSearch(t *testing.T) {
-	// 1. Verify registered commands contains search and others
+func TestCommandPaletteOnlyContainsNonFooterCommands(t *testing.T) {
+	// 1. Verify registered commands contains non-redundant commands
 	cmds := FilterCommands("")
-	if len(cmds) < 10 {
-		t.Fatalf("expected at least 10 registered commands, got %d", len(cmds))
+	if len(cmds) != 6 {
+		t.Fatalf("expected 6 non-redundant registered commands, got %d", len(cmds))
 	}
-	hasSearch := false
+	hasBg := false
 	for _, c := range cmds {
-		if c.Name == "search" {
-			hasSearch = true
+		if c.Name == "background" {
+			hasBg = true
 			break
 		}
 	}
-	if !hasSearch {
-		t.Fatal("expected search command in FilterCommands")
+	if !hasBg {
+		t.Fatal("expected background command in FilterCommands")
 	}
 
 	// 2. Open command palette with '/'
@@ -949,26 +1176,16 @@ func TestCommandPaletteNavigationAndSearch(t *testing.T) {
 		t.Fatal("expected search prompt in command palette view")
 	}
 
-	// 5. Test executing /search without args opens search view
-	m = pressKey(m, "esc")
-	m = pressKey(m, "/")
-	for _, c := range "search" {
-		m = pressKey(m, string(c))
+	// Footer actions must have no hidden slash-command resolver entries.
+	for _, name := range []string{"search", "play", "pause", "next", "prev", "playlists", "devices", "volume", "theme", "art", "quit"} {
+		if _, ok := ResolveCommand(name); ok {
+			t.Errorf("footer action /%s must not be registered in the command palette", name)
+		}
 	}
-	m = pressKey(m, "enter")
-	if m.currentView != viewSearch {
-		t.Fatalf("expected viewSearch after /search, got %d", m.currentView)
-	}
-
-	// 6. Test executing /playlists opens playlists view
-	m = pressKey(m, "esc")
-	m = pressKey(m, "/")
-	for _, c := range "playlists" {
-		m = pressKey(m, string(c))
-	}
-	m = pressKey(m, "enter")
-	if m.currentView != viewPlaylists {
-		t.Fatalf("expected viewPlaylists after /playlists, got %d", m.currentView)
+	for _, name := range []string{"background", "login", "update", "changelog", "version", "help"} {
+		if _, ok := ResolveCommand(name); !ok {
+			t.Errorf("expected /%s to remain available in the command palette", name)
+		}
 	}
 }
 
@@ -1020,34 +1237,38 @@ func TestTransportToastsSpacing(t *testing.T) {
 		},
 	}
 
-	// 1. Space to pause produces generous spacing in toast
+	// 1. Space to pause produces the friendly pause toast
 	m = pressKey(m, " ")
-	if !strings.Contains(m.toastMessage, "⏸   En pausa") {
-		t.Fatalf("expected '⏸   En pausa' in toast, got %q", m.toastMessage)
+	if m.toastMessage != toastPaused {
+		t.Fatalf("expected %q in toast, got %q", toastPaused, m.toastMessage)
 	}
+	next, _ := m.Update(actionMsg{name: "pausar"})
+	m = next.(Model)
 
-	// 2. Space to resume produces generous spacing in toast
+	// 2. Space to resume produces the friendly playing toast
 	m.transportBusy = false
 	m.lastTransport = time.Time{}
 	m = pressKey(m, " ")
-	if !strings.Contains(m.toastMessage, "▶   Reproduciendo") {
-		t.Fatalf("expected '▶   Reproduciendo' in toast, got %q", m.toastMessage)
+	if m.toastMessage != toastPlaying {
+		t.Fatalf("expected %q in toast, got %q", toastPlaying, m.toastMessage)
 	}
+	next, _ = m.Update(actionMsg{name: "reproducir"})
+	m = next.(Model)
 
 	// 3. Next song toast
 	m.transportBusy = false
 	m.lastTransport = time.Time{}
 	m = pressKey(m, "right")
-	if !strings.Contains(m.toastMessage, "⏭   Siguiente canción") {
-		t.Fatalf("expected '⏭   Siguiente canción' in toast, got %q", m.toastMessage)
+	if m.toastMessage != toastNext {
+		t.Fatalf("expected %q in toast, got %q", toastNext, m.toastMessage)
 	}
 
 	// 4. Prev song toast
 	m.transportBusy = false
 	m.lastTransport = time.Time{}
 	m = pressKey(m, "left")
-	if !strings.Contains(m.toastMessage, "⏮   Canción anterior") {
-		t.Fatalf("expected '⏮   Canción anterior' in toast, got %q", m.toastMessage)
+	if m.toastMessage != toastPrev {
+		t.Fatalf("expected %q in toast, got %q", toastPrev, m.toastMessage)
 	}
 }
 
@@ -1084,13 +1305,13 @@ func TestBigCoverArtViewAndToggle(t *testing.T) {
 		t.Fatalf("expected zenTransActive to be true right after entering viewCoverArt")
 	}
 
-	// Advance transition to completion (56 frames)
-	for i := 0; i < 60; i++ {
-		updated, _ := m.Update(spinner.TickMsg{})
+	// Advance the independent 30 FPS transition clock to completion (~1 second).
+	for i := 0; i < ZenTransitionMaxFrames; i++ {
+		updated, _ := m.Update(zenTransitionTickMsg{epoch: m.zenTransitionClockEpoch})
 		m = updated.(Model)
 	}
 	if m.zenTransActive {
-		t.Fatalf("expected zenTransActive to be false after 60 ticks")
+		t.Fatalf("expected zenTransActive to be false after %d ticks", ZenTransitionMaxFrames)
 	}
 
 	// 2. View() in viewCoverArt contains the big cover art, track, and artist subtitle
@@ -1126,14 +1347,10 @@ func TestBigCoverArtViewAndToggle(t *testing.T) {
 		t.Fatalf("expected viewPlaylists after second 'z', got %d", m.currentView)
 	}
 
-	// 4. Command /art toggles into viewCoverArt
-	m = pressKey(m, "/")
-	for _, c := range "art" {
-		m = pressKey(m, string(c))
-	}
-	m = pressKey(m, "enter")
+	// 4. The footer shortcut toggles back into Zen mode.
+	m = pressKey(m, "z")
 	if m.currentView != viewCoverArt {
-		t.Fatalf("expected viewCoverArt after /art command, got %d", m.currentView)
+		t.Fatalf("expected viewCoverArt after pressing z, got %d", m.currentView)
 	}
 
 	// 5. Esc returns to viewPlaylists
@@ -1239,11 +1456,13 @@ func TestProgressAdvancesAutomaticallyDuringTicksWithoutPause(t *testing.T) {
 		t.Fatalf("expected real-time progress to show 00:05, got:\n%s", stripped)
 	}
 
-	// A spinner tick while playing MUST reschedule the next tick (cmd != nil)
-	next, cmd := m.Update(m.spinner.Tick())
-	_ = next.(Model)
-	if cmd == nil {
-		t.Fatal("expected spinner.TickMsg to return next tick command while playing")
+	// Normal playback gets a low-frequency position refresh, separate from Zen.
+	if cmds := m.reconcileClocks(); len(cmds) != 1 {
+		t.Fatalf("expected one playback timer, got %d", len(cmds))
+	}
+	_, cmd := m.Update(playbackTickMsg{epoch: m.playbackClockEpoch})
+	if cmd == nil || !m.playbackTickScheduled {
+		t.Fatal("expected playback clock to schedule its next one-second refresh")
 	}
 }
 
@@ -1339,7 +1558,7 @@ func TestGaplessPrefetchDoesNotSwitchTrackPrematurely(t *testing.T) {
 	// Now simulate song finishing (progress reached 200000ms) and tick fires
 	m2.state.ProgressMS = 200000
 	m2.lastSync = time.Now()
-	tickModel, _ := m2.Update(spinner.TickMsg{Time: time.Now()})
+	tickModel, _ := m2.Update(playbackTickMsg{epoch: m2.playbackClockEpoch})
 	m3 := tickModel.(Model)
 
 	// Now it MUST promote the prefetched track!
@@ -1537,7 +1756,6 @@ func TestRightAlignedVisualizerAndFineProgressBar(t *testing.T) {
 func TestLikedTracksSingleHeart(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	m.width, m.height = 100, 24
-	m.menuTransActive = false
 	m.playlists = []spotify.Playlist{
 		{ID: spotify.LikedTracksID, Name: "Canciones que te gustan"},
 		{ID: "p2", Name: "♥ Canciones que te gustan"},
@@ -1572,38 +1790,82 @@ func TestZenTransitionNoPrevCoverGlitch(t *testing.T) {
 	if !mZen.zenTransActive {
 		t.Fatal("expected zenTransActive to be true")
 	}
-	if ZenTransitionMaxFrames != 50 {
-		t.Fatalf("expected ZenTransitionMaxFrames to be 50 (6.0s at 120ms), got %d", ZenTransitionMaxFrames)
+	if ZenTransitionMaxFrames != 30 {
+		t.Fatalf("expected ZenTransitionMaxFrames to be 30 (~1s at 33ms), got %d", ZenTransitionMaxFrames)
 	}
 }
 
-func TestStaggeredPlaylistAndTrackSweep(t *testing.T) {
+func TestZenAnimationClockIsIndependentAndStopsOutsideZen(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.state = spotify.PlaybackState{IsPlaying: true, Item: &spotify.Track{DurationMS: 120000}}
+	m = pressKey(m, "z")
+	if !m.zenTickScheduled || !m.zenTransitionTickScheduled || m.playbackTickScheduled {
+		t.Fatal("Zen must run independent ambient and entrance clocks, not the normal playback clock")
+	}
+
+	zenEpoch := m.zenClockEpoch
+	updated, cmd := m.Update(zenTickMsg{epoch: zenEpoch})
+	m = updated.(Model)
+	if m.zenFrame != 1 || m.zenTransFrame != 0 || !m.zenTickScheduled || cmd == nil {
+		t.Fatalf("ambient Zen tick changed the wrong clock: frame=%d transition=%d scheduled=%v", m.zenFrame, m.zenTransFrame, m.zenTickScheduled)
+	}
+
+	transitionEpoch := m.zenTransitionClockEpoch
+	updated, cmd = m.Update(zenTransitionTickMsg{epoch: transitionEpoch})
+	m = updated.(Model)
+	if m.zenTransFrame != 1 || !m.zenTransitionTickScheduled || cmd == nil {
+		t.Fatalf("entrance tick did not smoothly advance and reschedule its own clock: frame=%d scheduled=%v", m.zenTransFrame, m.zenTransitionTickScheduled)
+	}
+
+	m.setView(viewPlaylists)
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = updated.(Model)
+	if m.zenTickScheduled || m.zenTransitionTickScheduled || !m.playbackTickScheduled {
+		t.Fatal("leaving Zen must stop both Zen clocks and resume only the playback-position clock")
+	}
+
+	frame := m.zenFrame
+	transitionFrame := m.zenTransFrame
+	updated, _ = m.Update(tea.BlurMsg{})
+	m = updated.(Model)
+	updated, _ = m.Update(zenTickMsg{epoch: zenEpoch})
+	m = updated.(Model)
+	updated, _ = m.Update(zenTransitionTickMsg{epoch: transitionEpoch})
+	m = updated.(Model)
+	if m.zenFrame != frame || m.zenTransFrame != transitionFrame || m.playbackTickScheduled {
+		t.Fatal("stale Zen ticks must not animate after leaving Zen or losing focus")
+	}
+}
+
+func TestNormalModeHasNoDecorativeAnimationClock(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	m.setView(viewTracks)
-	if !m.menuTransActive {
-		t.Fatal("expected menuTransActive to be true on setView")
+	if cmds := m.reconcileClocks(); len(cmds) != 0 {
+		t.Fatal("idle normal mode must not schedule a decorative animation clock")
+	}
+	if m.zenTickScheduled || m.playbackTickScheduled {
+		t.Fatal("normal menu must not activate Zen or playback clocks while idle")
+	}
+}
+
+func TestStaticPlayerCardAndText(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 30
+	m.theme = theme.Theme{
+		Border: "#27272a",
+		Accent: "#1db954",
+		Text:   "#ffffff",
 	}
 
-	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("#1db954"))
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
+	// Trigger track transition
+	m, _ = m.applyTrackTransition(player.TrackEvent{
+		Name: "Starman",
+		URI:  "spotify:track:starman",
+	})
 
-	rowContent := "› • Mi Playlist Favorita (50)"
-
-	// Frame 0, Row 3: row 3 should not be revealed yet (spaces)
-	sweptEarly := renderSweptRow(rowContent, 3, 0, true, accent, muted)
-	if strings.Contains(sweptEarly, "Playlist") {
-		t.Fatalf("row 3 should not be revealed at frame 0, got %q", sweptEarly)
-	}
-
-	// Frame 3, Row 3: row 3 is scanning with spark
-	sweptScanning := renderSweptRow(rowContent, 3, 3, true, accent, muted)
-	if !strings.Contains(sweptScanning, "\x1b[") {
-		t.Fatalf("row 3 at active scan should contain ANSI spark, got %q", sweptScanning)
-	}
-
-	// Frame 10, Row 3: transition ended, returns full content
-	sweptDone := renderSweptRow(rowContent, 3, 10, true, accent, muted)
-	if sweptDone != rowContent {
-		t.Fatalf("expected full content at frame 10, got %q", sweptDone)
+	// View should render immediately with the track name
+	view := m.View()
+	if !strings.Contains(view.Content, "Starman") {
+		t.Fatalf("expected track name 'Starman' to be rendered immediately in view")
 	}
 }

@@ -59,3 +59,57 @@ func TestConfigSaveLoad(t *testing.T) {
 		t.Fatalf("expected bitrate 160, got %s", loaded.Bitrate)
 	}
 }
+
+// useTempConfigDir points the config path at a throwaway directory.
+func useTempConfigDir(t *testing.T) {
+	t.Helper()
+	tempDir := t.TempDir()
+	orig := os.Getenv("LOCALAPPDATA")
+	t.Cleanup(func() { _ = os.Setenv("LOCALAPPDATA", orig) })
+	_ = os.Setenv("LOCALAPPDATA", tempDir)
+}
+
+func TestLegacyBackgroundMigratesToFlowOnce(t *testing.T) {
+	useTempConfigDir(t)
+
+	// What the previous version stored when the ambiguous first option was picked.
+	if err := SaveConfig(Config{Theme: "nord", Bitrate: "320", Background: "gradient"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded := LoadConfig()
+	if loaded.Background != "flow" {
+		t.Fatalf("legacy 'gradient' must migrate to flow, got %q", loaded.Background)
+	}
+	if !loaded.BackgroundMigrated {
+		t.Fatal("the migration must be recorded so it only runs once")
+	}
+
+	// A deliberate gradient choice made afterwards must be respected.
+	if err := SaveBackground("gradient"); err != nil {
+		t.Fatalf("SaveBackground failed: %v", err)
+	}
+	if got := LoadConfig().Background; got != "gradient" {
+		t.Fatalf("an explicit gradient choice must stick after the migration, got %q", got)
+	}
+}
+
+func TestExplicitDarkBackgroundSurvivesMigration(t *testing.T) {
+	useTempConfigDir(t)
+
+	if err := SaveConfig(Config{Theme: "nord", Bitrate: "320", Background: "dark"}); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	if got := LoadConfig().Background; got != "dark" {
+		t.Fatalf("an explicit dark choice must not be migrated, got %q", got)
+	}
+}
+
+func TestFreshInstallDefaultsToFlow(t *testing.T) {
+	useTempConfigDir(t)
+
+	cfg := LoadConfig()
+	if cfg.Background != "flow" || cfg.Theme != "spotify-dark" || cfg.Bitrate != "320" {
+		t.Fatalf("unexpected defaults: %+v", cfg)
+	}
+}
