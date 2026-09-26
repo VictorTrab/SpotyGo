@@ -2,15 +2,18 @@ package ui
 
 import (
 	"errors"
+	"image"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/VictorTrab/SpotyGo/internal/player"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
 	"github.com/VictorTrab/SpotyGo/internal/theme"
+	"github.com/VictorTrab/SpotyGo/internal/version"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -1428,5 +1431,166 @@ func TestPinnedFooterAndLightTheme(t *testing.T) {
 	// Verify background applied is light (F8FAFC)
 	if !strings.Contains(lines[0], "\x1b[48;2;") {
 		t.Fatal("expected background truecolor escape sequences in line")
+	}
+}
+
+func TestAutoUpdateCheckAndPrompt(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+
+	// Verify default background is flow
+	if m.bgMode != "flow" {
+		t.Fatalf("expected default bgMode to be 'flow', got %q", m.bgMode)
+	}
+
+	// 1. Simulate updateCheckMsg with newer release
+	rel := &version.GitHubRelease{
+		TagName: "v9.9.9",
+		Name:    "v9.9.9",
+	}
+	mUpdated, _ := m.Update(updateCheckMsg{release: rel})
+	m2 := mUpdated.(Model)
+
+	if m2.currentView != viewUpdatePrompt {
+		t.Fatalf("expected viewUpdatePrompt on newer release, got %d", m2.currentView)
+	}
+
+	// Verify View contains update prompt text
+	view := m2.View()
+	if !strings.Contains(view.Content, "ACTUALIZACIÓN DISPONIBLE") || !strings.Contains(view.Content, "v9.9.9") {
+		t.Fatalf("expected update prompt content, got: %s", view.Content)
+	}
+
+	// 2. Pressing 'c' switches to viewChangelog
+	mChangelog := pressKey(m2, "c")
+	if mChangelog.currentView != viewChangelog {
+		t.Fatalf("expected viewChangelog after pressing 'c', got %d", mChangelog.currentView)
+	}
+
+	// 3. Pressing 'esc' in changelog returns to previous view
+	mBack := pressKey(mChangelog, "esc")
+	if mBack.currentView != viewUpdatePrompt {
+		t.Fatalf("expected return to viewUpdatePrompt, got %d", mBack.currentView)
+	}
+
+	// 4. Pressing 'esc' in update prompt dismisses to playlists
+	mDismiss := pressKey(mBack, "esc")
+	if mDismiss.currentView != viewPlaylists {
+		t.Fatalf("expected viewPlaylists after dismissing update prompt, got %d", mDismiss.currentView)
+	}
+}
+
+func TestChangelogModal(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+
+	// Open changelog via command /changelog
+	m = pressKey(m, "/")
+	for _, c := range "changelog" {
+		m = pressKey(m, string(c))
+	}
+	m = pressKey(m, "enter")
+
+	if m.currentView != viewChangelog {
+		t.Fatalf("expected viewChangelog after /changelog, got %d", m.currentView)
+	}
+
+	view := m.View()
+	if !strings.Contains(view.Content, "NOVEDADES Y CAMBIOS RECIENTES") {
+		t.Fatalf("expected changelog header in view, got: %s", view.Content)
+	}
+
+	// Pressing esc closes changelog
+	mClosed := pressKey(m, "esc")
+	if mClosed.currentView != viewPlaylists {
+		t.Fatalf("expected return to viewPlaylists, got %d", mClosed.currentView)
+	}
+}
+
+func TestRightAlignedVisualizerAndFineProgressBar(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+	m.state = spotify.PlaybackState{
+		Available: true,
+		IsPlaying: true,
+		Item: &spotify.Track{
+			URI:        "spotify:track:123",
+			Name:       "Test Track",
+			DurationMS: 200000,
+			Artists:    []spotify.Artist{{Name: "Test Artist"}},
+		},
+	}
+
+	view := m.View()
+	// Check fine progress bar elements
+	if !strings.Contains(view.Content, "●") {
+		t.Fatal("expected fine progress bar pulsing knob '●' in view")
+	}
+
+	// Check right equalizer rows
+	eqRows := renderRightEqualizer(true, 5, m.theme)
+	if len(eqRows) != 5 {
+		t.Fatalf("expected 5 equalizer rows, got %d", len(eqRows))
+	}
+	for i, row := range eqRows {
+		if row == "" {
+			t.Fatalf("row %d of equalizer should not be empty", i)
+		}
+	}
+}
+
+func TestZenTransitionNoPrevCoverGlitch(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+
+	// Pretend there was an old previous cover
+	m.zenPrevImage = image.NewRGBA(image.Rect(0, 0, 10, 10))
+
+	// Pressing 'z' to enter Zen mode
+	mZen := pressKey(m, "z")
+	if mZen.currentView != viewCoverArt {
+		t.Fatalf("expected viewCoverArt, got %d", mZen.currentView)
+	}
+	// zenPrevImage MUST be nil so it doesn't flash the old song's cover
+	if mZen.zenPrevImage != nil {
+		t.Fatal("expected zenPrevImage to be nil upon entering Zen mode")
+	}
+	if !mZen.zenTransActive {
+		t.Fatal("expected zenTransActive to be true")
+	}
+	if ZenTransitionMaxFrames != 50 {
+		t.Fatalf("expected ZenTransitionMaxFrames to be 50 (6.0s at 120ms), got %d", ZenTransitionMaxFrames)
+	}
+}
+
+func TestStaggeredPlaylistAndTrackSweep(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.setView(viewTracks)
+	if !m.menuTransActive {
+		t.Fatal("expected menuTransActive to be true on setView")
+	}
+
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("#1db954"))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
+
+	rowContent := "› • Mi Playlist Favorita (50)"
+
+	// Frame 0, Row 3: row 3 should not be revealed yet (spaces)
+	sweptEarly := renderSweptRow(rowContent, 3, 0, true, accent, muted)
+	if strings.Contains(sweptEarly, "Playlist") {
+		t.Fatalf("row 3 should not be revealed at frame 0, got %q", sweptEarly)
+	}
+
+	// Frame 3, Row 3: row 3 is scanning with spark
+	sweptScanning := renderSweptRow(rowContent, 3, 3, true, accent, muted)
+	if !strings.Contains(sweptScanning, "\x1b[") {
+		t.Fatalf("row 3 at active scan should contain ANSI spark, got %q", sweptScanning)
+	}
+
+	// Frame 10, Row 3: transition ended, returns full content
+	sweptDone := renderSweptRow(rowContent, 3, 10, true, accent, muted)
+	if sweptDone != rowContent {
+		t.Fatalf("expected full content at frame 10, got %q", sweptDone)
 	}
 }

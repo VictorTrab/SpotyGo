@@ -108,6 +108,12 @@ var registeredCommands = []CommandDef{
 		Action:      "update",
 	},
 	{
+		Name:        "changelog",
+		Aliases:     []string{"news", "whatsnew", "recent"},
+		Description: "Show summary of what's new in recent updates",
+		Action:      "changelog",
+	},
+	{
 		Name:        "quit",
 		Aliases:     []string{"q", "exit"},
 		Description: "Close SpotifyGo",

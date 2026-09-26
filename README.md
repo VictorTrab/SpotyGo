@@ -137,7 +137,8 @@ Escribe `/` en cualquier momento para desplegar la paleta de comandos interactiv
 - `/devices` — Lista y selector de dispositivos Spotify Connect disponibles.
 - `/volume <0-100>` — Ajusta el volumen de reproducción.
 - `/version` — Muestra la versión actual instalada.
-- `/update` — Instrucciones para actualizar la aplicación a la última versión.
+- `/changelog` — Muestra un resumen de las novedades y cambios de las versiones recientes.
+- `/update` — Comprueba e instala la última actualización disponible.
 - `/help` — Muestra la lista de comandos y atajos disponibles.
 - `/quit` — Cierra SpotifyGo.
 

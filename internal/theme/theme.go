@@ -211,11 +211,11 @@ func LoadConfig() Config {
 	p := configPath()
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return Config{Theme: "spotify-dark", Bitrate: "320", Background: "gradient"}
+		return Config{Theme: "spotify-dark", Bitrate: "320", Background: "flow"}
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return Config{Theme: "spotify-dark", Bitrate: "320", Background: "gradient"}
+		return Config{Theme: "spotify-dark", Bitrate: "320", Background: "flow"}
 	}
 	if cfg.Theme == "" {
 		cfg.Theme = "spotify-dark"
@@ -224,7 +224,7 @@ func LoadConfig() Config {
 		cfg.Bitrate = "320"
 	}
 	if cfg.Background == "" {
-		cfg.Background = "gradient"
+		cfg.Background = "flow"
 	}
 	return cfg
 }

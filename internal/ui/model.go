@@ -92,6 +92,8 @@ const (
 	viewThemePicker
 	viewBgPicker
 	viewCoverArt
+	viewUpdatePrompt
+	viewChangelog
 )
 
 type Model struct {
@@ -113,12 +115,19 @@ type Model struct {
 	introFrame       int
 	introStartTime   time.Time
 	currentCoverURL  string
+	updateRelease    *version.GitHubRelease
+	updateInProgress bool
+	updateError      string
+	updateDone       bool
+	changelogScroll  int
 	coverData        *CoverData
 	bigCoverCache    map[string][]string
 	zenTransFrame    int
 	zenTransActive   bool
 	zenPrevTrackID   string
 	zenPrevImage     image.Image
+	menuTransFrame   int
+	menuTransActive  bool
 	engineRestart    func(bitrate string) error
 	localReady       bool
 	transferSent     bool
@@ -188,15 +197,20 @@ type Model struct {
 	entriesCache   map[string][]spotify.PlaylistEntry
 }
 
-// ZenTransitionMaxFrames defines the smooth cinematic transition length (~4.5s at ~80ms tick rate)
-const ZenTransitionMaxFrames = 56
+// ZenTransitionMaxFrames defines the smooth cinematic transition length (~6.0s at ~120ms tick rate)
+const ZenTransitionMaxFrames = 50
 
 func (m *Model) triggerZenTransition() {
 	m.zenTransActive = true
 	m.zenTransFrame = 0
+	m.zenPrevImage = nil // Reset so it NEVER flashes the old cover when toggling Zen!
 }
 
 func (m *Model) setView(v viewMode) {
+	if m.currentView != v {
+		m.menuTransFrame = 0
+		m.menuTransActive = true
+	}
 	m.previousView = m.currentView
 	m.currentView = v
 	m.showPlaylists = (v == viewPlaylists)
@@ -229,7 +243,7 @@ var waveFramesBot = []string{
 func New(client *spotify.Client, localName string, engineDone <-chan error, engineEvents <-chan struct{}, volumeEvents ...<-chan int) Model {
 	pulse := spinner.New(spinner.WithSpinner(spinner.Spinner{
 		Frames: []string{"⠁⡀⠄⠠⠂⠁⡀⠄", "⠂⣄⠆⡄⠆⠂⣄⠆", "⠆⣦⠇⣤⠇⠆⣦⠇", "⠇⣷⣿⣶⣿⠇⣷⣿", "⠆⣦⠇⣤⠇⠆⣦⠇", "⠂⣄⠆⡄⠆⠂⣄⠆"},
-		FPS:    140 * time.Millisecond,
+		FPS:    120 * time.Millisecond,
 	}))
 
 	cfg := theme.LoadConfig()
@@ -261,11 +275,11 @@ func New(client *spotify.Client, localName string, engineDone <-chan error, engi
 	}
 
 	bgMode := cfg.Background
-	if bgMode == "" || bgMode == "gradient" {
-		bgMode = "default"
+	if bgMode == "" {
+		bgMode = "flow"
 	}
-	if bgMode != "default" && bgMode != "flow" && bgMode != "dark" {
-		bgMode = "default"
+	if bgMode != "default" && bgMode != "flow" && bgMode != "dark" && bgMode != "gradient" {
+		bgMode = "flow"
 	}
 
 	m := Model{
@@ -602,6 +616,24 @@ func poll() tea.Cmd {
 	return tea.Tick(25*time.Second, func(time.Time) tea.Msg { return pollMsg{} })
 }
 
+type updateCheckMsg struct {
+	release *version.GitHubRelease
+	err     error
+}
+
+type updateApplyMsg struct {
+	err error
+}
+
+func checkUpdateCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rel, err := version.CheckLatest(ctx)
+		return updateCheckMsg{release: rel, err: err}
+	}
+}
+
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.forceFetchState(),
@@ -611,6 +643,7 @@ func (m Model) Init() tea.Cmd {
 		m.spinner.Tick,
 		m.listenEngine(),
 		m.listenVolume(),
+		checkUpdateCmd(),
 		func() tea.Msg {
 			return engineStoppedMsg{err: <-m.engineDone}
 		},
@@ -834,7 +867,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.state.IsPlaying || m.zenTransActive {
+		if m.state.IsPlaying || m.zenTransActive || m.menuTransActive {
 			m.waveFrame = (m.waveFrame + 1) % len(waveFramesTop)
 			m.flowFrame++
 		}
@@ -842,6 +875,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.zenTransFrame++
 			if m.zenTransFrame >= ZenTransitionMaxFrames {
 				m.zenTransActive = false
+			} else {
+				cmd = tea.Batch(cmd, m.spinner.Tick)
+			}
+		}
+		if m.menuTransActive {
+			m.menuTransFrame++
+			if m.menuTransFrame > 8 {
+				m.menuTransActive = false
 			} else {
 				cmd = tea.Batch(cmd, m.spinner.Tick)
 			}
@@ -862,6 +903,29 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusError = false
 		}
 		return m, tea.Batch(m.fetchState(), m.fetchDevices(), m.fetchPlaylists(0))
+	case updateCheckMsg:
+		if msg.err == nil && msg.release != nil && version.IsNewer(msg.release.TagName, version.Current) {
+			m.updateRelease = msg.release
+			m.updateInProgress = false
+			m.updateError = ""
+			m.updateDone = false
+			if m.currentView == viewPlaylists || m.currentView == viewCoverArt {
+				m.setView(viewUpdatePrompt)
+			}
+		}
+		return m, nil
+	case updateApplyMsg:
+		m.updateInProgress = false
+		if msg.err != nil {
+			m.updateError = msg.err.Error()
+			m.status = "Error al actualizar: " + msg.err.Error()
+			m.statusError = true
+		} else {
+			m.updateDone = true
+			m.status = "¡SpotifyGo actualizado con éxito! Reinicia para aplicar."
+			m.statusError = false
+		}
+		return m, nil
 	case searchMsg:
 		if msg.seq != m.searchSeq || m.currentView != viewSearch {
 			break
@@ -887,6 +951,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			if msg.offset == 0 {
 				m.playlists = nil
+				m.menuTransFrame = 0
+				m.menuTransActive = true
 			}
 			m.playlists = append(m.playlists, msg.page.Items...)
 			m.playlistTotal, m.playlistMore = msg.page.Total, msg.page.Next != ""
@@ -910,6 +976,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			if msg.offset == 0 {
 				m.entries = nil
+				m.menuTransFrame = 0
+				m.menuTransActive = true
 			}
 			m.entries = append(m.entries, msg.page.Items...)
 			m.entriesTotal, m.entriesMore = msg.page.Total, msg.page.Next != ""
@@ -1476,16 +1544,30 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					return m, toastCmd
 				case "help":
 					m.status = ""
-					toastCmd := m.triggerToast("Commands: /art, /search, /play, /pause, /background, /theme, /devices, /quality, /version, /update, /help", 25)
+					toastCmd := m.triggerToast("Commands: /search, /play, /pause, /art, /theme, /background, /changelog, /update, /devices, /quality, /help", 25)
 					return m, toastCmd
 				case "version":
 					m.status = ""
 					toastCmd := m.triggerToast("SpotifyGo "+version.Current+" (github.com/VictorTrab/SpotyGo)", 25)
 					return m, toastCmd
-				case "update":
+				case "changelog", "news", "whatsnew":
+					m.setView(viewChangelog)
+					m.changelogScroll = 0
 					m.status = ""
-					toastCmd := m.triggerToast("To update, run 'spotifygo update' in your terminal", 25)
-					return m, toastCmd
+					return m, nil
+				case "update":
+					if m.updateRelease != nil && version.IsNewer(m.updateRelease.TagName, version.Current) {
+						m.setView(viewUpdatePrompt)
+						m.status = ""
+						return m, nil
+					}
+					m.status = "Comprobando actualizaciones en GitHub…"
+					return m, func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						rel, err := version.CheckLatest(ctx)
+						return updateCheckMsg{release: rel, err: err}
+					}
 				}
 				return m, nil
 			default:
@@ -1695,6 +1777,82 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = ""
 				toastCmd := m.triggerToast("🎨 Fondo fijado en: "+label, 14)
 				return m, toastCmd
+			}
+			return m, nil
+		}
+
+		// 3c. VIEW: UPDATE PROMPT MODAL
+		if m.currentView == viewUpdatePrompt {
+			switch key {
+			case "esc", "n", "N":
+				target := m.previousView
+				if target == viewUpdatePrompt || target == viewChangelog {
+					target = viewPlaylists
+				}
+				m.setView(target)
+				toastCmd := m.triggerToast("Actualización pospuesta", 10)
+				return m, toastCmd
+			case "c", "C":
+				m.setView(viewChangelog)
+				return m, nil
+			case "enter", "y", "Y":
+				if m.updateDone {
+					target := m.previousView
+					if target == viewUpdatePrompt || target == viewChangelog {
+						target = viewPlaylists
+					}
+					m.setView(target)
+					return m, nil
+				}
+				if m.updateInProgress {
+					return m, nil
+				}
+				if m.updateRelease == nil || m.updateRelease.TagName == "" {
+					target := m.previousView
+					if target == viewUpdatePrompt || target == viewChangelog {
+						target = viewPlaylists
+					}
+					m.setView(target)
+					return m, nil
+				}
+				m.updateInProgress = true
+				m.updateError = ""
+				tag := m.updateRelease.TagName
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					defer cancel()
+					err := version.DownloadAndApplyUpdate(ctx, tag)
+					return updateApplyMsg{err: err}
+				}
+			}
+			return m, nil
+		}
+
+		// 3d. VIEW: CHANGELOG MODAL
+		if m.currentView == viewChangelog {
+			switch key {
+			case "esc", "q", "enter":
+				target := m.previousView
+				if target == viewChangelog {
+					target = viewPlaylists
+				}
+				m.setView(target)
+				return m, nil
+			case "u", "U":
+				if m.updateRelease != nil && version.IsNewer(m.updateRelease.TagName, version.Current) {
+					m.setView(viewUpdatePrompt)
+					return m, nil
+				}
+				toastCmd := m.triggerToast("SpotifyGo "+version.Current+" es la versión más reciente", 12)
+				return m, toastCmd
+			case "up", "k":
+				if m.changelogScroll > 0 {
+					m.changelogScroll--
+				}
+				return m, nil
+			case "down", "j":
+				m.changelogScroll++
+				return m, nil
 			}
 			return m, nil
 		}
@@ -2203,7 +2361,7 @@ func (m Model) View() tea.View {
 			}
 			rightLines[2] = muted.Render(albumYear)
 
-			// Row 3: Play/Pause Icon + Progress Bar
+			// Row 3: Play/Pause Icon + Fine Progress Bar
 			position := m.state.ProgressMS
 			if m.state.IsPlaying && !m.lastSync.IsZero() {
 				position += int(time.Since(m.lastSync).Milliseconds())
@@ -2213,7 +2371,6 @@ func (m Model) View() tea.View {
 			if m.state.Item.DurationMS > 0 {
 				fraction = float64(position) / float64(m.state.Item.DurationMS)
 			}
-			prog := m.progress
 			var statusIcon string
 			if m.state.IsPlaying {
 				statusIcon = accent.Render("▶")
@@ -2222,13 +2379,21 @@ func (m Model) View() tea.View {
 			}
 			currStr := muted.Render(duration(position))
 			totStr := muted.Render(duration(m.state.Item.DurationMS))
-			barW := max(6, min(40, rightW-ansi.StringWidth(statusIcon)-ansi.StringWidth(currStr)-ansi.StringWidth(totStr)-6))
-			prog.SetWidth(barW)
-			rightLines[3] = statusIcon + "  " + currStr + " " + prog.ViewAs(fraction) + " " + totStr
 
-			// Row 4: Clean Audio Waveform visualizer (No "Reproduciendo" text)
+			useEq := rightW >= 42
+			eqW := 15
+			infoW := rightW
+			if useEq {
+				infoW = rightW - eqW - 2
+			}
+
+			barW := max(6, min(36, infoW-ansi.StringWidth(statusIcon)-ansi.StringWidth(currStr)-ansi.StringWidth(totStr)-4))
+			fineBar := renderFineProgressBar(barW, fraction, m.state.IsPlaying, m.flowFrame, m.theme)
+			rightLines[3] = statusIcon + " " + currStr + " " + fineBar + " " + totStr
+
+			// Row 4: Quality & status details
 			if m.state.IsPlaying {
-				rightLines[4] = "   " + waveTopColor.Render(waveFramesTop[m.waveFrame%len(waveFramesTop)])
+				rightLines[4] = muted.Render("320k hq · stereo")
 			} else {
 				rightLines[4] = ""
 			}
@@ -2240,9 +2405,24 @@ func (m Model) View() tea.View {
 			rightLines[4] = secondary.Render("Atajos: '?' ayuda · 'S' buscar")
 		}
 
+		eqRows := renderRightEqualizer(m.state.IsPlaying, m.flowFrame, m.theme)
+		useEq := rightW >= 42
+		eqW := 15
+		infoW := rightW
+		if useEq {
+			infoW = rightW - eqW - 2
+		}
+
 		for i := 0; i < 5; i++ {
 			cPart := coverLines[i] + "  "
-			rPart := ansi.Truncate(rightLines[i], rightW, "…")
+			var rPart string
+			if useEq {
+				infoPart := ansi.Truncate(rightLines[i], infoW, "…")
+				padInfo := max(0, infoW-ansi.StringWidth(infoPart))
+				rPart = infoPart + strings.Repeat(" ", padInfo) + "  " + eqRows[i]
+			} else {
+				rPart = ansi.Truncate(rightLines[i], rightW, "…")
+			}
 			pad := max(0, rightW-ansi.StringWidth(rPart))
 			lines = append(lines, fit(cardRow(cPart+rPart+strings.Repeat(" ", pad), width, cardBorder)))
 		}
@@ -2374,13 +2554,19 @@ func (m Model) View() tea.View {
 				}
 
 				rowStr := fmt.Sprintf("%s%-4d %-*s %-*s  %6s %s", prefix, entry.Position+1, titleWidth, trackName, artistWidth, artistName, durStr, nowIcon)
+				var rowFormatted string
 				if isCurrent {
-					body = append(body, playingColor.Render(rowStr))
+					rowFormatted = playingColor.Render(rowStr)
 				} else if i == m.entryPick {
-					body = append(body, bright.Render(rowStr))
+					rowFormatted = bright.Render(rowStr)
 				} else {
-					body = append(body, muted.Render(rowStr))
+					rowFormatted = muted.Render(rowStr)
 				}
+				if m.menuTransActive {
+					rowIdx := i - start
+					rowFormatted = renderSweptRow(rowFormatted, rowIdx, m.menuTransFrame, (i == m.entryPick), accent, muted)
+				}
+				body = append(body, rowFormatted)
 			}
 		}
 
@@ -2479,6 +2665,69 @@ func (m Model) View() tea.View {
 		body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
 		body = append(body, " "+muted.Render("↑/↓: previsualizar en vivo · Enter: confirmar · Esc: volver"))
 
+	case viewUpdatePrompt:
+		body = append(body, " "+accent.Render("🚀 ACTUALIZACIÓN DISPONIBLE"))
+		body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
+		body = append(body, "")
+
+		tag := "v1.0.3"
+		if m.updateRelease != nil && m.updateRelease.TagName != "" {
+			tag = m.updateRelease.TagName
+		}
+
+		if m.updateInProgress {
+			body = append(body, " "+bright.Render("⏳ Descargando e instalando actualización "+tag+"…"))
+			body = append(body, " "+muted.Render("Por favor espera unos segundos mientras se reemplaza el binario."))
+			body = append(body, "")
+			body = append(body, " "+dim.Render("Descarga directa desde GitHub Releases…"))
+		} else if m.updateDone {
+			body = append(body, " "+accent.Render("🎉 ¡SpotifyGo se actualizó con éxito a "+tag+"!"))
+			body = append(body, "")
+			body = append(body, " "+bright.Render("La próxima vez que abras SpotifyGo disfrutarás de todas las mejoras."))
+			body = append(body, " "+muted.Render("Pulsa Enter o Esc para continuar usando la aplicación."))
+			body = append(body, "")
+			body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
+			body = append(body, " "+secondary.Render("[ Enter / Esc ] Continuar"))
+		} else if m.updateError != "" {
+			body = append(body, " "+errColor.Render("! Error al descargar la actualización automática:"))
+			body = append(body, " "+muted.Render(m.updateError))
+			body = append(body, "")
+			body = append(body, " "+bright.Render("Puedes actualizar manualmente ejecutando en tu terminal:"))
+			body = append(body, " "+accent.Render("  spotifygo update"))
+			body = append(body, "")
+			body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
+			body = append(body, " "+secondary.Render("[ Esc ] Cerrar y continuar"))
+		} else {
+			body = append(body, " "+bright.Render("Se ha publicado una nueva versión:")+" "+accent.Render(tag)+" "+muted.Render("(instalada: "+version.Current+")"))
+			body = append(body, "")
+			body = append(body, " "+bright.Render("¿Deseas descargar e instalar la actualización ahora mismo?"))
+			body = append(body, " "+muted.Render("La actualización se aplica en segundos y mantiene tu sesión y configuración intactas."))
+			body = append(body, "")
+			body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
+			enterPill := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.PillKeyFg)).Background(lipgloss.Color(m.theme.PillKeyBg)).Bold(true).Render(" Enter / y ")
+			escPill := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.PillKeyFg)).Background(lipgloss.Color(m.theme.PillKeyBg)).Bold(true).Render(" Esc / n ")
+			newsPill := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.PillKeyFg)).Background(lipgloss.Color(m.theme.PillKeyBg)).Bold(true).Render(" c ")
+			body = append(body, " "+enterPill+" "+bright.Render("Actualizar ahora")+"    "+newsPill+" "+bright.Render("Ver novedades")+"    "+escPill+" "+muted.Render("Recordar luego"))
+		}
+
+	case viewChangelog:
+		body = append(body, " "+accent.Render("✨ NOVEDADES Y CAMBIOS RECIENTES")+" "+muted.Render("(SpotifyGo "+version.Current+")"))
+		body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
+		body = append(body, "")
+
+		highlights := version.RecentHighlights()
+		for _, h := range highlights {
+			badge := accent.Render("● "+h.Version) + " " + dim.Render("· "+h.Tagline)
+			body = append(body, " "+badge)
+			for _, pt := range h.Points {
+				body = append(body, "   "+muted.Render("· "+pt))
+			}
+			body = append(body, "")
+		}
+
+		body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
+		body = append(body, " "+muted.Render("Esc / Enter: volver al reproductor · u: buscar actualización · /help: ver comandos"))
+
 	case viewPlaylists:
 		fallthrough
 	default:
@@ -2497,11 +2746,18 @@ func (m Model) View() tea.View {
 			} else if strings.Contains(p.Name, "Radio") || strings.Contains(p.Name, "Mix") {
 				icon = "📻 "
 			}
-			if i == m.playlistPick {
-				body = append(body, " "+bright.Render("› "+icon+p.Name))
+			isPick := (i == m.playlistPick)
+			var rowText string
+			if isPick {
+				rowText = bright.Render("› " + icon + p.Name)
 			} else {
-				body = append(body, " "+muted.Render("  "+icon+p.Name))
+				rowText = muted.Render("  " + icon + p.Name)
 			}
+			if m.menuTransActive {
+				rowIdx := i - start
+				rowText = renderSweptRow(rowText, rowIdx, m.menuTransFrame, isPick, accent, muted)
+			}
+			body = append(body, " "+rowText)
 		}
 	}
 
@@ -2739,6 +2995,30 @@ func (m Model) renderFooter(width int) string {
 			pill("↑/↓", "Previsualizar"),
 			pill("Esc", "Cancelar"),
 		}
+	case viewUpdatePrompt:
+		if m.updateDone {
+			items = []string{
+				pill("Enter/Esc", "Continuar"),
+				pill("q", "Salir"),
+			}
+		} else if m.updateInProgress {
+			items = []string{
+				pill("⏳", "Instalando..."),
+			}
+		} else {
+			items = []string{
+				pill("Enter/y", "Actualizar"),
+				pill("c", "Novedades"),
+				pill("Esc/n", "Omitir"),
+			}
+		}
+	case viewChangelog:
+		items = []string{
+			pill("Esc/Enter", "Volver"),
+			pill("↑/↓", "Desplazar"),
+			pill("u", "Actualizar"),
+			pill("q", "Salir"),
+		}
 	default:
 		items = []string{
 			pill("Space", "Play"),
@@ -2905,4 +3185,178 @@ func listStart(selected, total, rows int) int {
 func duration(ms int) string {
 	seconds := max(0, ms/1000)
 	return fmt.Sprintf("%02d:%02d", seconds/60, seconds%60)
+}
+
+func renderFineProgressBar(barW int, fraction float64, isPlaying bool, frame int, th theme.Theme) string {
+	if barW <= 2 {
+		return ""
+	}
+	fraction = max(0.0, min(1.0, fraction))
+	filledCount := int(fraction * float64(barW-1))
+	if filledCount >= barW {
+		filledCount = barW - 1
+	}
+
+	accentHex := th.Accent
+	if accentHex == "" {
+		accentHex = "#1DB954"
+	}
+	secondHex := th.Secondary
+	if secondHex == "" {
+		secondHex = "#1ED760"
+	}
+	dimHex := th.Dim
+	if dimHex == "" {
+		dimHex = "#475569"
+	}
+
+	// Breathing / pulsing knob at playback head
+	knobColor := accentHex
+	if isPlaying {
+		pulse := 0.5 + 0.5*math.Sin(float64(frame)*0.4)
+		knobColor = LerpHex(accentHex, "#ffffff", 0.5*pulse)
+	} else {
+		knobColor = LerpHex(accentHex, dimHex, 0.4)
+	}
+	knobStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(knobColor)).Bold(true)
+
+	var sb strings.Builder
+	wavePos := (frame * 2) % max(1, barW)
+
+	for i := 0; i < barW; i++ {
+		if i == filledCount {
+			sb.WriteString(knobStyle.Render("●"))
+		} else if i < filledCount {
+			shimmer := 0.0
+			if isPlaying {
+				dist := math.Abs(float64(i - wavePos))
+				if dist < 3.0 {
+					shimmer = (3.0 - dist) / 3.0
+				}
+			}
+			t := float64(i) / float64(max(1, barW))
+			c := LerpHex(accentHex, secondHex, t*0.5)
+			if shimmer > 0 {
+				c = LerpHex(c, "#ffffff", 0.4*shimmer)
+			}
+			st := lipgloss.NewStyle().Foreground(lipgloss.Color(c))
+			sb.WriteString(st.Render("━"))
+		} else {
+			st := lipgloss.NewStyle().Foreground(lipgloss.Color(dimHex))
+			sb.WriteString(st.Render("─"))
+		}
+	}
+	return sb.String()
+}
+
+func renderRightEqualizer(isPlaying bool, frame int, th theme.Theme) [5]string {
+	var rows [5]string
+	topCol := th.WaveTop
+	if topCol == "" {
+		topCol = th.Accent
+	}
+	botCol := th.WaveBot
+	if botCol == "" {
+		botCol = th.Secondary
+	}
+	dimCol := th.Dim
+	if dimCol == "" {
+		dimCol = "#475569"
+	}
+
+	// 8 dancing frequency bands (total width: 8 chars + 7 spaces = 15 chars)
+	var heights [8]float64
+	if isPlaying {
+		for i := 0; i < 8; i++ {
+			f := float64(frame) * 0.28
+			idx := float64(i)
+			v1 := math.Sin(f + idx*0.75)
+			v2 := math.Cos(f*1.4 - idx*0.5)
+			v3 := math.Sin(f*0.6 + idx*1.3)
+			val := 0.45 + 0.28*v1 + 0.17*v2 + 0.10*v3
+			boost := 1.15 - 0.25*math.Abs(idx-3.5)/4.0
+			h := val * 5.0 * boost
+			heights[i] = max(0.4, min(5.0, h))
+		}
+	} else {
+		for i := 0; i < 8; i++ {
+			heights[i] = 0.6
+		}
+	}
+
+	chars := []string{" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	for r := 0; r < 5; r++ {
+		thresh := float64(5 - r)
+		var sb strings.Builder
+		rowColor := LerpHex(topCol, botCol, float64(r)/4.0)
+		if !isPlaying {
+			rowColor = dimCol
+		}
+		st := lipgloss.NewStyle().Foreground(lipgloss.Color(rowColor))
+
+		for i := 0; i < 8; i++ {
+			h := heights[i]
+			var ch string
+			if h >= thresh {
+				ch = "█"
+			} else if h > thresh-1.0 {
+				frac := h - (thresh - 1.0)
+				idx := int(frac * 8.0)
+				idx = max(0, min(8, idx))
+				ch = chars[idx]
+			} else {
+				ch = " "
+			}
+			sb.WriteString(st.Render(ch))
+			if i < 7 {
+				sb.WriteString(" ")
+			}
+		}
+		rows[r] = sb.String()
+	}
+	return rows
+}
+
+func renderSweptRow(content string, itemIdx int, transFrame int, isPick bool, accent, muted lipgloss.Style) string {
+	if transFrame >= 8 {
+		return content
+	}
+	// Staggered reveal: each row starts 1 frame later
+	rowStart := itemIdx
+	if transFrame < rowStart {
+		return strings.Repeat(" ", ansi.StringWidth(content))
+	}
+	frameOffset := transFrame - rowStart
+	if frameOffset >= 2 {
+		return content
+	}
+
+	plain := ansi.Strip(content)
+	runes := []rune(plain)
+	total := len(runes)
+	if total == 0 {
+		return content
+	}
+	progress := 0.45
+	if frameOffset == 1 {
+		progress = 0.85
+	}
+	headPos := int(progress * float64(total+2))
+	var sb strings.Builder
+	for i, ch := range runes {
+		if i < headPos-2 {
+			if isPick {
+				sb.WriteString(accent.Render(string(ch)))
+			} else {
+				sb.WriteString(muted.Render(string(ch)))
+			}
+		} else if i >= headPos-2 && i <= headPos {
+			spark := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Bold(true)
+			sb.WriteString(spark.Render(string(ch)))
+		} else {
+			sb.WriteString(" ")
+		}
+	}
+	return sb.String()
 }

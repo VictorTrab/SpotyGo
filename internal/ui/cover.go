@@ -212,29 +212,29 @@ func RenderBlurredCoverLines(img image.Image, prevImg image.Image, widthChars, h
 
 	progress = max(0.0, min(1.0, progress))
 
-	// Rich, cinematic progressive blur radius:
-	// t: 0.00 - 0.28 -> radius 3 (7x7 neighborhood - wide dreamy bokeh/diffusion)
-	// t: 0.28 - 0.55 -> radius 2 (5x5 neighborhood - soft forms emerging)
-	// t: 0.55 - 0.78 -> radius 1 (3x3 neighborhood - details crystallizing)
-	// t: 0.78 - 1.00 -> radius 0 (interpolating to 100% razor sharp)
-	blurRadius := 0
+	// Smooth continuous multi-tier blur blending:
+	// Eliminates abrupt radius jumps, creating a silky 6-second optical refocusing effect
+	var blurred image.Image
 	switch {
-	case progress < 0.28:
-		blurRadius = 3
-	case progress < 0.55:
-		blurRadius = 2
-	case progress < 0.78:
-		blurRadius = 1
+	case progress < 0.40:
+		subProgress := progress / 0.40
+		b3 := applyBoxBlur(scaled, targetW, targetH, 3)
+		b2 := applyBoxBlur(scaled, targetW, targetH, 2)
+		blurred = blendImages(b3, b2, subProgress)
+	case progress < 0.75:
+		subProgress := (progress - 0.40) / 0.35
+		b2 := applyBoxBlur(scaled, targetW, targetH, 2)
+		b1 := applyBoxBlur(scaled, targetW, targetH, 1)
+		blurred = blendImages(b2, b1, subProgress)
 	default:
-		blurRadius = 0
+		subProgress := (progress - 0.75) / 0.25
+		b1 := applyBoxBlur(scaled, targetW, targetH, 1)
+		blurred = blendImages(b1, scaled, subProgress)
 	}
 
-	blurred := applyBoxBlur(scaled, targetW, targetH, blurRadius)
-
-	// Contrast blooms smoothly into full radiance from 38% up to 100%
-	contrastFactor := 0.38 + 0.62*progress
-	// Slower easing on sharpness so the diffuse feeling lingers and then snaps into focus
-	sharpWeight := math.Pow(progress, 1.8)
+	// Smooth sinusoidal easing curve for progressive crystal-sharp focus
+	sharpWeight := 0.5 * (1.0 - math.Cos(progress*math.Pi))
+	contrastFactor := 0.45 + 0.55*progress
 
 	lines := make([]string, heightChars)
 	for y := 0; y < heightChars; y++ {
@@ -282,6 +282,29 @@ func applyBoxBlur(src image.Image, w, h, radius int) image.Image {
 					A: 255,
 				})
 			}
+		}
+	}
+	return dst
+}
+
+func blendImages(imgA, imgB image.Image, weightB float64) image.Image {
+	if weightB <= 0.0 {
+		return imgA
+	}
+	if weightB >= 1.0 {
+		return imgB
+	}
+	b := imgA.Bounds()
+	dst := image.NewRGBA(b)
+	weightA := 1.0 - weightB
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			rA, gA, bA, _ := imgA.At(x, y).RGBA()
+			rB, gB, bB, _ := imgB.At(x, y).RGBA()
+			r := uint8(float64(rA>>8)*weightA + float64(rB>>8)*weightB)
+			g := uint8(float64(gA>>8)*weightA + float64(gB>>8)*weightB)
+			bl := uint8(float64(bA>>8)*weightA + float64(bB>>8)*weightB)
+			dst.Set(x, y, color.RGBA{R: r, G: g, B: bl, A: 255})
 		}
 	}
 	return dst
