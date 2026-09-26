@@ -226,7 +226,7 @@ func (c *Client) SearchTracks(ctx context.Context, query string) ([]Track, error
 	if query == "" {
 		return nil, errors.New("escribe una búsqueda")
 	}
-	values := url.Values{"q": {query}, "type": {"track"}, "limit": {"5"}}
+	values := url.Values{"q": {query}, "type": {"track"}, "limit": {"10"}}
 	var result struct {
 		Tracks struct {
 			Items []Track `json:"items"`

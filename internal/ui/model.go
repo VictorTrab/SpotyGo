@@ -135,11 +135,13 @@ type Model struct {
 	showPlaylists  bool
 	showTracks     bool
 	showDevices    bool
-	searching      bool
-	searchInput    string
-	searchResults  []spotify.Track
-	searchSelected int
-	searchSeq      int
+	searching       bool
+	searchInput     string
+	lastSearchQuery string
+	searchResults   []spotify.Track
+	searchSelected  int
+	searchSeq       int
+	mutePreviousVol *int
 	playlists      []spotify.Playlist
 	playlistTotal  int
 	playlistMore   bool
@@ -420,6 +422,12 @@ func (m Model) fetchEntries(offset int) tea.Cmd {
 func (m Model) playPlaylist(position int) (tea.Model, tea.Cmd) {
 	device, ok := m.localDevice()
 	if !ok {
+		if m.state.Device != nil && m.state.Device.ID != "" && !m.state.Device.IsRestricted {
+			device = *m.state.Device
+			ok = true
+		}
+	}
+	if !ok {
 		m.status, m.statusError = "Dispositivo local no disponible", true
 		return m, nil
 	}
@@ -459,6 +467,12 @@ func (m Model) playPlaylist(position int) (tea.Model, tea.Cmd) {
 
 func (m Model) playTrack(track spotify.Track) (tea.Model, tea.Cmd) {
 	device, ok := m.localDevice()
+	if !ok {
+		if m.state.Device != nil && m.state.Device.ID != "" && !m.state.Device.IsRestricted {
+			device = *m.state.Device
+			ok = true
+		}
+	}
 	if !ok {
 		m.status, m.statusError = "Dispositivo local no disponible", true
 		return m, nil
@@ -1492,6 +1506,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchSeq++
 				m.searchInput = ""
 				m.searchResults = nil
+				m.lastSearchQuery = ""
 				return m, nil
 			case "backspace":
 				m.searchSeq++
@@ -1500,6 +1515,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.searchInput = string(chars[:len(chars)-1])
 				}
 				m.searchResults = nil
+				m.lastSearchQuery = ""
 				return m, nil
 			case "up":
 				if m.searchSelected > 0 {
@@ -1512,8 +1528,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "enter":
-				if len(m.searchResults) > 0 && m.searchInput == "" && m.searchSelected >= 0 && m.searchSelected < len(m.searchResults) {
+				query := strings.TrimSpace(m.searchInput)
+				if len(m.searchResults) > 0 && query == m.lastSearchQuery && m.searchSelected >= 0 && m.searchSelected < len(m.searchResults) {
 					device, ok := m.localDevice()
+					if !ok {
+						if m.state.Device != nil && m.state.Device.ID != "" && !m.state.Device.IsRestricted {
+							device = *m.state.Device
+							ok = true
+						}
+					}
 					if !ok {
 						m.status = "El dispositivo local aún no está listo"
 						m.statusError = true
@@ -1523,16 +1546,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.setView(m.previousView)
 					m.transportBusy = true
 					m.stateEpoch++
-					m.status = "Reproduciendo " + track.Name + " en esta computadora…"
+					m.status = "Reproduciendo " + track.Name
 					m.statusError = false
-					return m, m.act("canción", func(ctx context.Context) error { return m.client.PlayTrack(ctx, track, device.ID) })
+					toastCmd := m.triggerToast("▶ Reproduciendo: "+track.Name, 12)
+					return m, tea.Batch(m.act("canción", func(ctx context.Context) error { return m.client.PlayTrack(ctx, track, device.ID) }), toastCmd)
 				}
-				query := strings.TrimSpace(m.searchInput)
 				if query != "" {
 					m.searchSeq++
 					seq := m.searchSeq
-					m.searchInput = ""
+					m.lastSearchQuery = query
 					m.searchResults = nil
+					m.searchSelected = 0
 					m.status = "Buscando " + query + "…"
 					m.statusError = false
 					return m, func() tea.Msg {
@@ -1546,6 +1570,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					m.searchSeq++
 					m.searchInput += text
 					m.searchResults = nil
+					m.lastSearchQuery = ""
 				}
 				return m, nil
 			}
@@ -1596,11 +1621,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				)
 				return m, nil
 			case "enter":
-				_ = theme.SaveConfig(theme.Config{Theme: m.theme.ID})
+				_ = theme.SaveTheme(m.theme.ID)
 				m.setView(m.previousView)
 				m.status = "Tema aplicado: " + m.theme.Name
 				m.statusError = false
-				return m, nil
+				toastCmd := m.triggerToast("🎨 Tema aplicado: "+m.theme.Name, 14)
+				return m, toastCmd
 			}
 			return m, nil
 		}
@@ -1860,6 +1886,52 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.commandMatches = FilterCommands("")
 			m.commandSelect = 0
 			return m, nil
+		case "?", "h":
+			m.commandActive = true
+			m.commandInput = ""
+			m.commandMatches = FilterCommands("")
+			m.commandSelect = 0
+			return m, nil
+		case "t":
+			m.themeList = theme.All()
+			for idx, th := range m.themeList {
+				if th.ID == m.theme.ID {
+					m.themeSelected = idx
+					break
+				}
+			}
+			m.setView(viewThemePicker)
+			return m, nil
+		case "m", "M":
+			if m.state.Device == nil {
+				return m, nil
+			}
+			current := 50
+			if m.volumeOverride != nil {
+				current = *m.volumeOverride
+			} else if m.state.Device.VolumePercent != nil {
+				current = *m.state.Device.VolumePercent
+			}
+			var next int
+			var toastMsg string
+			if current > 0 {
+				m.mutePreviousVol = &current
+				next = 0
+				toastMsg = "🔇 Mute (silenciado)"
+			} else {
+				restore := 50
+				if m.mutePreviousVol != nil && *m.mutePreviousVol > 0 {
+					restore = *m.mutePreviousVol
+				}
+				next = restore
+				toastMsg = fmt.Sprintf("🔊 Sonido restaurado (%d%%)", next)
+			}
+			m.volumeOverride = &next
+			m.volumeSeq++
+			m.stateEpoch++
+			seq := m.volumeSeq
+			toastCmd := m.triggerToast(toastMsg, 12)
+			return m, tea.Batch(tea.Tick(280*time.Millisecond, func(time.Time) tea.Msg { return volumeDueMsg{seq: seq} }), toastCmd)
 		case "S", "shift+s", "s":
 			m.setView(viewSearch)
 			m.searchInput = ""
@@ -2030,8 +2102,12 @@ func (m Model) View() tea.View {
 		taskIndicator = errColor.Render("! " + m.status)
 	} else if m.toastMessage != "" {
 		// Eye-catching floating notification pill badge
+		toastFg := "#0c0d0e"
+		if m.theme.IsLight() {
+			toastFg = "#ffffff"
+		}
 		toastPill := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#0c0d0e")).
+			Foreground(lipgloss.Color(toastFg)).
 			Background(lipgloss.Color(m.theme.Accent)).
 			Bold(true).
 			Padding(0, 1).
@@ -2327,12 +2403,32 @@ func (m Model) View() tea.View {
 		body = append(body, " "+secondary.Render("🔍 BUSCAR EN SPOTIFY"))
 		body = append(body, " "+secondary.Render("S: "+m.searchInput+"▌"))
 		body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
-		for i, item := range m.searchResults {
-			prefix, style := "  ", muted
-			if i == m.searchSelected {
-				prefix, style = "› ", bright
+		if len(m.searchResults) == 0 {
+			if strings.TrimSpace(m.searchInput) == "" {
+				body = append(body, " "+muted.Render("Escribe canción o artista y pulsa Enter"))
+			} else if !m.entriesBusy {
+				body = append(body, " "+muted.Render("Pulsa Enter para buscar '"+m.searchInput+"'"))
 			}
-			body = append(body, " "+style.Render(prefix+item.Name))
+		} else {
+			avail := max(20, width-14)
+			titleWidth := int(float64(avail) * 0.50)
+			artistWidth := avail - titleWidth
+			for i, item := range m.searchResults {
+				prefix, style := "   ", muted
+				if i == m.searchSelected {
+					prefix, style = " › ", bright
+				}
+				var artists []string
+				for _, a := range item.Artists {
+					artists = append(artists, a.Name)
+				}
+				artistStr := strings.Join(artists, ", ")
+				tName := ansi.Truncate(item.Name, titleWidth-1, "…")
+				aName := ansi.Truncate(artistStr, artistWidth-1, "…")
+				durStr := duration(item.DurationMS)
+				rowStr := fmt.Sprintf("%s%-*s %-*s  %5s", prefix, titleWidth, tName, artistWidth, aName, durStr)
+				body = append(body, " "+style.Render(rowStr))
+			}
 		}
 
 	case viewThemePicker:
@@ -2377,7 +2473,7 @@ func (m Model) View() tea.View {
 		if m.bgPickerSelected == 2 {
 			opt2Radio, opt2Prefix, opt2Style, opt2Desc = "[●]", " › ", bright, secondary
 		}
-		body = append(body, " "+accent.Render(opt2Prefix+opt2Radio)+" "+opt2Style.Render("dark")+"                 "+opt2Desc.Render("— Fondo oscuro sólido del tema actual ("+m.theme.Name+")"))
+		body = append(body, " "+accent.Render(opt2Prefix+opt2Radio)+" "+opt2Style.Render("dark")+"                 "+opt2Desc.Render("— Fondo sólido del tema actual ("+m.theme.Name+")"))
 
 		body = append(body, "")
 		body = append(body, dim.Render(" "+strings.Repeat("─", max(10, width-2))))
@@ -2497,37 +2593,55 @@ func (m Model) View() tea.View {
 		body = append(body, padLeft+" "+muted.Render("↑/↓: navigate · Enter: select · Esc: cancel"))
 	}
 
-	space := max(0, height-len(lines))
-	for i := 0; i < space; i++ {
+	targetHeight := max(1, height-1)
+	hasFooter := height >= 14 && !m.commandActive
+	bodyLimit := targetHeight
+	if hasFooter {
+		bodyLimit = targetHeight - 1
+	}
+
+	for i := 0; len(lines) < bodyLimit; i++ {
 		if i < len(body) {
 			lines = append(lines, fit(body[i]))
 		} else {
 			lines = append(lines, fit(""))
 		}
 	}
-
-	// Fill up to height-1 to guarantee Windows Terminal / ConPTY never triggers autowrap scroll
-	targetHeight := max(1, height-1)
-	for len(lines) < targetHeight {
-		lines = append(lines, fit(""))
+	if len(lines) > bodyLimit {
+		lines = lines[:bodyLimit]
 	}
-	if len(lines) > targetHeight {
-		lines = lines[:targetHeight]
+
+	if hasFooter {
+		lines = append(lines, fit(m.renderFooter(width)))
 	}
 
 	// Apply background styling to each line
+	baseBg := m.theme.BgBase
+	if baseBg == "" {
+		baseBg = "#0c0d0e"
+	}
+	isLight := m.theme.IsLight()
+
 	switch m.bgMode {
 	case "flow":
-		// Animated dynamic gradient flow (breathing ambient hue with subtle wave propagation)
-		// Strictly faithful to album cover palette (isolated from theme BgBase, never hardcoded green)
+		// Animated dynamic gradient flow
 		topColor := "#16161a"
 		secColor := "#101014"
+		if isLight {
+			topColor = "#f1f5f9"
+			secColor = "#e2e8f0"
+		}
 		if m.coverData != nil && m.coverData.DominantHex != "" {
-			topColor = m.coverData.DominantHex
-			if m.coverData.SecondaryHex != "" {
-				secColor = m.coverData.SecondaryHex
+			if isLight {
+				topColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.70)
+				secColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.85)
 			} else {
-				secColor = LerpHex(topColor, "#080808", 0.40)
+				topColor = m.coverData.DominantHex
+				if m.coverData.SecondaryHex != "" {
+					secColor = m.coverData.SecondaryHex
+				} else {
+					secColor = LerpHex(topColor, baseBg, 0.40)
+				}
 			}
 		}
 		cycle := 60.0
@@ -2539,27 +2653,34 @@ func (m Model) View() tea.View {
 			t := float64(i) / float64(max(1, totalLines-1))
 			waveShift := 0.08 * math.Sin(2*math.Pi*(float64(m.flowFrame)/cycle - t*0.8))
 			factor := min(1.0, max(0.0, t*1.35+waveShift))
-			rowBg := LerpHex(flowTop, "#080808", factor)
+			rowBg := LerpHex(flowTop, baseBg, factor)
 			lines[i] = ApplyRowBackground(lines[i], rowBg)
 		}
 	case "dark":
-		// Only in dark mode does the theme's background color apply!
+		// Solid background of current theme
 		for i := range lines {
-			lines[i] = ApplyRowBackground(lines[i], m.theme.BgBase)
+			lines[i] = ApplyRowBackground(lines[i], baseBg)
 		}
 	case "default", "gradient":
 		fallthrough
 	default:
-		// Default: Vertical gradient strictly reactive to album cover (isolated from theme BgBase)
+		// Default: Vertical gradient reactive to album cover
 		topColor := "#141418"
+		if isLight {
+			topColor = "#f1f5f9"
+		}
 		if m.coverData != nil && m.coverData.DominantHex != "" {
-			topColor = m.coverData.DominantHex
+			if isLight {
+				topColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.72)
+			} else {
+				topColor = m.coverData.DominantHex
+			}
 		}
 		totalLines := len(lines)
 		for i := 0; i < totalLines; i++ {
 			t := float64(i) / float64(max(1, totalLines-1))
 			factor := min(1.0, t*1.35)
-			rowBg := LerpHex(topColor, "#080808", factor)
+			rowBg := LerpHex(topColor, baseBg, factor)
 			lines[i] = ApplyRowBackground(lines[i], rowBg)
 		}
 	}
@@ -2568,6 +2689,84 @@ func (m Model) View() tea.View {
 	view.AltScreen = true
 	view.ReportFocus = true
 	return view
+}
+
+func (m Model) renderFooter(width int) string {
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Dim))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.PillKeyFg)).Background(lipgloss.Color(m.theme.PillKeyBg)).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
+	sep := dim.Render(" · ")
+
+	pill := func(key, desc string) string {
+		return keyStyle.Render(" "+key+" ") + " " + descStyle.Render(desc)
+	}
+
+	var items []string
+	switch m.currentView {
+	case viewTracks:
+		items = []string{
+			pill("Enter", "Tocar"),
+			pill("p", "Playlist"),
+			pill("Esc", "Volver"),
+			pill("Space", "Play/Pausa"),
+			pill("n/b", "Sig/Ant"),
+			pill("r", "Recargar"),
+			pill("q", "Salir"),
+		}
+	case viewSearch:
+		items = []string{
+			pill("Enter", "Buscar/Tocar"),
+			pill("↑/↓", "Navegar"),
+			pill("Esc", "Volver"),
+			pill("q", "Salir"),
+		}
+	case viewDevices:
+		items = []string{
+			pill("Enter", "Transferir"),
+			pill("↑/↓", "Elegir"),
+			pill("Esc", "Volver"),
+			pill("q", "Salir"),
+		}
+	case viewThemePicker:
+		items = []string{
+			pill("Enter", "Aplicar"),
+			pill("↑/↓", "Previsualizar"),
+			pill("Esc", "Cancelar"),
+		}
+	case viewBgPicker:
+		items = []string{
+			pill("Enter", "Confirmar"),
+			pill("↑/↓", "Previsualizar"),
+			pill("Esc", "Cancelar"),
+		}
+	default:
+		items = []string{
+			pill("Space", "Play"),
+			pill("n/b", "Skip"),
+			pill("+/-", "Vol"),
+			pill("m", "Mute"),
+			pill("s", "Buscar"),
+			pill("t", "Tema"),
+			pill("d", "Disp"),
+			pill("z", "Zen"),
+			pill("/", "Cmds"),
+			pill("q", "Salir"),
+		}
+	}
+
+	result := " "
+	for i, item := range items {
+		candidate := result
+		if i > 0 {
+			candidate += sep
+		}
+		candidate += item
+		if ansi.StringWidth(candidate) > width-2 {
+			break
+		}
+		result = candidate
+	}
+	return result
 }
 
 func cardRow(content string, width int, borderStyle lipgloss.Style) string {

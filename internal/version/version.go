@@ -15,7 +15,7 @@ import (
 
 var (
 	// Version is the current semantic version of SpotifyGo.
-	Current = "v1.0.1"
+	Current = "v1.0.2"
 	// RepoOwner is the GitHub repository owner.
 	RepoOwner = "VictorTrab"
 	// RepoName is the GitHub repository name.

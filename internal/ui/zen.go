@@ -112,21 +112,33 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	lines := make([]string, targetHeight)
 
 	// 1. Background color palette
+	isLight := m.theme.IsLight()
+	bgBase := m.theme.BgBase
+	if bgBase == "" {
+		bgBase = "#080808"
+	}
 	topColor := "#141418"
 	secColor := "#101014"
+	if isLight {
+		topColor = "#f1f5f9"
+		secColor = "#e2e8f0"
+	}
 	if m.coverData != nil && m.coverData.DominantHex != "" {
-		topColor = m.coverData.DominantHex
-		if m.coverData.SecondaryHex != "" {
-			secColor = m.coverData.SecondaryHex
+		if isLight {
+			topColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.70)
+			secColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.85)
 		} else {
-			secColor = LerpHex(topColor, "#080808", 0.40)
+			topColor = m.coverData.DominantHex
+			if m.coverData.SecondaryHex != "" {
+				secColor = m.coverData.SecondaryHex
+			} else {
+				secColor = LerpHex(topColor, bgBase, 0.40)
+			}
 		}
 	}
-	bgBase := "#080808"
 	if m.bgMode == "dark" {
-		topColor = m.theme.BgBase
-		secColor = m.theme.BgBase
-		bgBase = m.theme.BgBase
+		topColor = bgBase
+		secColor = bgBase
 	}
 
 	// 2. Responsive square cover dimensions
@@ -174,7 +186,11 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	padLeftCover := strings.Repeat(" ", padLeftCoverW)
 
 	// Audio-reactive rhythm border: subtle breathing with music pulse (~115 BPM)
-	borderColor := computeRhythmBorderColor(LerpHex(topColor, "#52525b", 0.35), m.state.IsPlaying, position, m.flowFrame)
+	borderBaseTone := "#52525b"
+	if isLight {
+		borderBaseTone = m.theme.Border
+	}
+	borderColor := computeRhythmBorderColor(LerpHex(topColor, borderBaseTone, 0.35), m.state.IsPlaying, position, m.flowFrame)
 	boxBorder := lipgloss.NewStyle().Foreground(lipgloss.Color(borderColor))
 
 	coverLines := m.getBigCoverLines(coverW, coverH)
@@ -198,10 +214,16 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 		twinkle := math.Sin(float64(m.flowFrame)*s.speed + s.phase)
 		if twinkle > 0.15 {
 			alpha := (twinkle - 0.15) / 0.85
+			starColor := s.color
+			starBase := "#ffffff"
+			if isLight {
+				starColor = m.theme.Accent
+				starBase = bgBase
+			}
 			starsAtRow[sy] = append(starsAtRow[sy], starPoint{
 				x:     sx,
 				char:  s.char,
-				color: LerpHex("#ffffff", s.color, alpha),
+				color: LerpHex(starBase, starColor, alpha),
 			})
 		}
 	}
@@ -223,9 +245,9 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 			flowTop := LerpHex(topColor, secColor, sineVal)
 			waveShift := 0.08 * math.Sin(2*math.Pi*(float64(m.flowFrame)/cycle - t*0.8))
 			factor := min(1.0, max(0.0, t*1.35+waveShift))
-			rowBg = LerpHex(flowTop, "#080808", factor)
+			rowBg = LerpHex(flowTop, bgBase, factor)
 		} else if m.bgMode == "dark" {
-			rowBg = m.theme.BgBase
+			rowBg = bgBase
 		} else {
 			rowBg = LerpHex(topColor, bgBase, min(1.0, t*1.35))
 		}

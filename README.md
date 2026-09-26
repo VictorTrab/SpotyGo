@@ -110,14 +110,15 @@ spotifygo version
 | `n` / `→` | Siguiente canción |
 | `p` / `←` | Canción anterior |
 | `+` / `-` | Subir / Bajar volumen (en pasos de 5%) |
+| `m` | Alternar Silencio / Mute (restaura volumen anterior) |
+| `t` | Abrir selector interactivo de temas de color |
 | `j` / `↓` | Mover cursor hacia abajo |
 | `k` / `↑` | Mover cursor hacia arriba |
 | `Enter` | Abrir playlist seleccionada / Reproducir canción |
 | `Esc` | Volver a la vista de playlists / Cerrar modal |
 | `z` | Alternar Modo Zen (`/art`) con cielo estrellado |
 | `S` | Búsqueda directa de canciones |
-| `/` | Abrir Paleta de Comandos interactiva |
-| `?` | Ayuda y atajos |
+| `/` o `?` | Abrir Paleta de Comandos interactiva |
 | `q` / `Ctrl+C` | Salir de SpotifyGo |
 
 ### Comandos Rápidos (`/`)

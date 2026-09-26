@@ -24,6 +24,18 @@ func TestAllThemes(t *testing.T) {
 	}
 }
 
+func TestThemeIsLight(t *testing.T) {
+	light := Get("light-minimal")
+	if !light.IsLight() {
+		t.Fatal("expected light-minimal to be light")
+	}
+
+	dark := Get("spotify-dark")
+	if dark.IsLight() {
+		t.Fatal("expected spotify-dark not to be light")
+	}
+}
+
 func TestConfigSaveLoad(t *testing.T) {
 	tempDir := t.TempDir()
 	origLocal := os.Getenv("LOCALAPPDATA")

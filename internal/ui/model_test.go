@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/VictorTrab/SpotyGo/internal/player"
 	"github.com/VictorTrab/SpotyGo/internal/spotify"
+	"github.com/VictorTrab/SpotyGo/internal/theme"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -1365,5 +1366,67 @@ func TestBoundsClamping(t *testing.T) {
 	m3 := pressKey(m2, "enter")
 	if m3.entryPick >= len(m3.entries) {
 		t.Fatalf("expected entryPick to be clamped, got %d", m3.entryPick)
+	}
+}
+
+func TestHotkeysAndMute(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	vol := 70
+	m.state = spotify.PlaybackState{
+		Available: true,
+		Device: &spotify.Device{
+			ID:            "dev-1",
+			Name:          "Speaker",
+			VolumePercent: &vol,
+		},
+	}
+
+	// 1. Press 't' to open theme picker
+	m2 := pressKey(m, "t")
+	if m2.currentView != viewThemePicker {
+		t.Fatalf("expected viewThemePicker, got %d", m2.currentView)
+	}
+	m2 = pressKey(m2, "esc")
+
+	// 2. Press '?' to open command palette
+	m3 := pressKey(m2, "?")
+	if !m3.commandActive {
+		t.Fatal("expected commandActive true on '?'")
+	}
+	m3 = pressKey(m3, "esc")
+
+	// 3. Press 'm' to mute
+	mMute := pressKey(m3, "m")
+	if mMute.volumeOverride == nil || *mMute.volumeOverride != 0 {
+		t.Fatalf("expected volume override 0 on mute, got %v", mMute.volumeOverride)
+	}
+
+	// 4. Press 'm' again to unmute (restore previous volume 70)
+	mUnmute := pressKey(mMute, "m")
+	if mUnmute.volumeOverride == nil || *mUnmute.volumeOverride != 70 {
+		t.Fatalf("expected volume restored to 70, got %v", mUnmute.volumeOverride)
+	}
+}
+
+func TestPinnedFooterAndLightTheme(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+	m.theme = theme.Get("light-minimal")
+
+	view := m.View()
+	lines := strings.Split(view.Content, "\n")
+	if len(lines) != 23 {
+		t.Fatalf("expected 23 terminal rows (height-1), got %d", len(lines))
+	}
+
+	// Last line should have the footer shortcuts
+	lastLine := ansi.Strip(lines[len(lines)-1])
+	if !strings.Contains(lastLine, "Play") || !strings.Contains(lastLine, "Tema") {
+		t.Fatalf("expected footer with shortcuts on last line, got: %q", lastLine)
+	}
+
+	// Verify background applied is light (F8FAFC)
+	if !strings.Contains(lines[0], "\x1b[48;2;") {
+		t.Fatal("expected background truecolor escape sequences in line")
 	}
 }

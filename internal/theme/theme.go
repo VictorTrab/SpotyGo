@@ -2,6 +2,7 @@ package theme
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,20 +117,20 @@ var (
 		ID:          "light-minimal",
 		Name:        "Light Minimal",
 		Description: "Estilo limpio de alto contraste con azul índigo y esmeralda",
-		Accent:      "#4338CA",
-		Secondary:   "#059669",
-		Border:      "#94A3B8",
+		Accent:      "#3730A3",
+		Secondary:   "#047857",
+		Border:      "#64748B",
 		Text:        "#0F172A",
-		Muted:       "#475569",
-		Dim:         "#CBD5E1",
-		Warning:     "#D97706",
-		Error:       "#DC2626",
-		Playing:     "#2563EB",
-		WaveTop:     "#4338CA",
-		WaveBot:     "#059669",
-		PillKeyFg:   "#4338CA",
-		PillKeyBg:   "#E0E7FF",
-		BgBase:      "#f8fafc",
+		Muted:       "#334155",
+		Dim:         "#64748B",
+		Warning:     "#B45309",
+		Error:       "#B91C1C",
+		Playing:     "#1D4ED8",
+		WaveTop:     "#3730A3",
+		WaveBot:     "#047857",
+		PillKeyFg:   "#FFFFFF",
+		PillKeyBg:   "#3730A3",
+		BgBase:      "#F8FAFC",
 	}
 
 	allThemes = []Theme{
@@ -140,6 +141,23 @@ var (
 		ThemeLightMinimal,
 	}
 )
+
+// IsLight reports whether the theme uses a light background canvas.
+func (t Theme) IsLight() bool {
+	if t.ID == "light-minimal" {
+		return true
+	}
+	s := strings.TrimPrefix(t.BgBase, "#")
+	if len(s) != 6 {
+		return false
+	}
+	var r, g, b uint8
+	if _, err := fmt.Sscanf(s, "%02x%02x%02x", &r, &g, &b); err != nil {
+		return false
+	}
+	lum := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
+	return lum > 140
+}
 
 // All returns all registered themes.
 func All() []Theme {
