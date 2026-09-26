@@ -26,7 +26,7 @@ import (
 
 const (
 	DefaultClientID = "d420a117a32841c2b3474932e49fb54b"
-	redirectURI    = "http://127.0.0.1:8989/callback"
+	redirectURI    = "http://127.0.0.1:8989/login"
 	keyringService = "SpotyGo Spotify"
 	scopes         = "user-read-playback-state user-modify-playback-state user-read-currently-playing streaming app-remote-control playlist-read-private playlist-read-collaborative user-library-read user-read-recently-played user-top-read"
 )
@@ -257,8 +257,7 @@ func (a *Auth) authorize(ctx context.Context) error {
 	}
 	callback := make(chan callbackResult, 1)
 	var callbackOnce sync.Once
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	handleOAuth := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(state)) != 1 {
 			http.Error(w, "Solicitud OAuth no válida", http.StatusBadRequest)
 			return
@@ -278,7 +277,10 @@ func (a *Auth) authorize(ctx context.Context) error {
 		fmt.Fprint(w, "SpotyGo recibió la autorización. Puedes cerrar esta pestaña.")
 		_ = http.NewResponseController(w).Flush()
 		callback <- result
-	})
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/login", handleOAuth)
+	mux.HandleFunc("/callback", handleOAuth)
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go server.Serve(listener)
 	defer func() {

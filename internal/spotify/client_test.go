@@ -56,6 +56,7 @@ func TestPlaylistsPrependsLikedTracks(t *testing.T) {
 
 func TestTrackCaching(t *testing.T) {
 	client := NewClient(nil)
+	client.diskCacheDir = t.TempDir()
 	track := Track{
 		URI:     "spotify:track:test1234",
 		Name:    "Test Track",

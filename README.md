@@ -75,7 +75,7 @@ Ejecuta en tu terminal:
 spotifygo login
 ```
 
-Se abrirá una ventana de navegador solicitando autorización en Spotify. La aplicación usa el flujo estándar y seguro de OAuth 2.0 PKCE en bucle local (`http://127.0.0.1:8989/callback`).
+Se abrirá una ventana de navegador solicitando autorización en Spotify. La aplicación usa el flujo estándar y seguro de OAuth 2.0 PKCE en bucle local (`http://127.0.0.1:8989/login`).
 
 ### 2. Abrir SpotifyGo
 Una vez autenticado, simplemente ejecuta:
