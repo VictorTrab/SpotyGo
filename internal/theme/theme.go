@@ -2,7 +2,6 @@ package theme
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,73 +35,73 @@ var (
 	ThemeSpotifyDark = Theme{
 		ID:          "spotify-dark",
 		Name:        "Spotify Dark",
-		Description: "Clásico verde Spotify con fondos carbón y slate",
-		Accent:      "#1DB954",
-		Secondary:   "#22D3EE",
-		Border:      "#3F3F46",
-		Text:        "#F8FAFC",
-		Muted:       "#94A3B8",
-		Dim:         "#27272A",
-		Warning:     "#F5B841",
-		Error:       "#EF4444",
+		Description: "Clásico verde Spotify con fondos carbón y slate de alto contraste",
+		Accent:      "#1ED760",
+		Secondary:   "#38BDF8",
+		Border:      "#52525B",
+		Text:        "#FFFFFF",
+		Muted:       "#CBD5E1",
+		Dim:         "#64748B",
+		Warning:     "#FBBF24",
+		Error:       "#F87171",
 		Playing:     "#38BDF8",
-		WaveTop:     "#1DB954",
-		WaveBot:     "#22D3EE",
-		PillKeyFg:   "#1DB954",
-		PillKeyBg:   "#182E1E",
+		WaveTop:     "#1ED760",
+		WaveBot:     "#38BDF8",
+		PillKeyFg:   "#1ED760",
+		PillKeyBg:   "#143820",
 		BgBase:      "#0c0d0e",
 	}
 
 	ThemeCyberpunk = Theme{
 		ID:          "cyberpunk",
 		Name:        "Cyberpunk Neon",
-		Description: "Retrofuturista con fucsia neón, cian y amarillo",
+		Description: "Retrofuturista con fucsia neón, cian eléctrico y alto contraste",
 		Accent:      "#FF007F",
 		Secondary:   "#00F0FF",
-		Border:      "#FF007F",
+		Border:      "#FF1493",
 		Text:        "#FFFFFF",
-		Muted:       "#A855F7",
-		Dim:         "#4A0E4E",
-		Warning:     "#FFE600",
-		Error:       "#FF1744",
+		Muted:       "#E2E8F0",
+		Dim:         "#7C3AED",
+		Warning:     "#FACC15",
+		Error:       "#FF3366",
 		Playing:     "#00F0FF",
 		WaveTop:     "#FF007F",
 		WaveBot:     "#00F0FF",
 		PillKeyFg:   "#00F0FF",
-		PillKeyBg:   "#2A0845",
-		BgBase:      "#0d0221",
+		PillKeyBg:   "#3B0764",
+		BgBase:      "#0a0118",
 	}
 
 	ThemeTokyoNight = Theme{
 		ID:          "tokyo-night",
 		Name:        "Tokyo Night",
-		Description: "Paleta nocturna con violeta, rosa y cian suave",
-		Accent:      "#BD93F9",
-		Secondary:   "#FF79C6",
-		Border:      "#6272A4",
-		Text:        "#F8F8F2",
-		Muted:       "#8BE9FD",
-		Dim:         "#44475A",
-		Warning:     "#F1FA8C",
-		Error:       "#FF5555",
-		Playing:     "#50FA7B",
-		WaveTop:     "#BD93F9",
-		WaveBot:     "#FF79C6",
-		PillKeyFg:   "#BD93F9",
+		Description: "Paleta nocturna nítida con violeta, rosa y azul eléctrico",
+		Accent:      "#C084FC",
+		Secondary:   "#F472B6",
+		Border:      "#7AA2F7",
+		Text:        "#FFFFFF",
+		Muted:       "#E2E8F0",
+		Dim:         "#6B7280",
+		Warning:     "#FBBF24",
+		Error:       "#F87171",
+		Playing:     "#4ADE80",
+		WaveTop:     "#C084FC",
+		WaveBot:     "#F472B6",
+		PillKeyFg:   "#C084FC",
 		PillKeyBg:   "#382A54",
-		BgBase:      "#1a1b26",
+		BgBase:      "#13141f",
 	}
 
 	ThemeNord = Theme{
 		ID:          "nord",
 		Name:        "Nord Arctic",
-		Description: "Tonalidades del ártico con azul hielo y verde aurora",
+		Description: "Tonalidades del ártico nítidas con azul hielo y verde aurora",
 		Accent:      "#88C0D0",
 		Secondary:   "#81A1C1",
-		Border:      "#4C566A",
-		Text:        "#ECEFF4",
-		Muted:       "#D8DEE9",
-		Dim:         "#3B4252",
+		Border:      "#616E88",
+		Text:        "#FFFFFF",
+		Muted:       "#E5E9F0",
+		Dim:         "#4C566A",
 		Warning:     "#EBCB8B",
 		Error:       "#BF616A",
 		Playing:     "#A3BE8C",
@@ -110,27 +109,7 @@ var (
 		WaveBot:     "#A3BE8C",
 		PillKeyFg:   "#88C0D0",
 		PillKeyBg:   "#2E3440",
-		BgBase:      "#242933",
-	}
-
-	ThemeLightMinimal = Theme{
-		ID:          "light-minimal",
-		Name:        "Light Minimal",
-		Description: "Estilo limpio de alto contraste con azul índigo y esmeralda",
-		Accent:      "#3730A3",
-		Secondary:   "#047857",
-		Border:      "#64748B",
-		Text:        "#0F172A",
-		Muted:       "#334155",
-		Dim:         "#64748B",
-		Warning:     "#B45309",
-		Error:       "#B91C1C",
-		Playing:     "#1D4ED8",
-		WaveTop:     "#3730A3",
-		WaveBot:     "#047857",
-		PillKeyFg:   "#FFFFFF",
-		PillKeyBg:   "#3730A3",
-		BgBase:      "#F8FAFC",
+		BgBase:      "#1e222a",
 	}
 
 	allThemes = []Theme{
@@ -138,25 +117,12 @@ var (
 		ThemeCyberpunk,
 		ThemeTokyoNight,
 		ThemeNord,
-		ThemeLightMinimal,
 	}
 )
 
-// IsLight reports whether the theme uses a light background canvas.
+// IsLight reports whether the theme uses a light background canvas (always false as light theme was removed).
 func (t Theme) IsLight() bool {
-	if t.ID == "light-minimal" {
-		return true
-	}
-	s := strings.TrimPrefix(t.BgBase, "#")
-	if len(s) != 6 {
-		return false
-	}
-	var r, g, b uint8
-	if _, err := fmt.Sscanf(s, "%02x%02x%02x", &r, &g, &b); err != nil {
-		return false
-	}
-	lum := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
-	return lum > 140
+	return false
 }
 
 // All returns all registered themes.

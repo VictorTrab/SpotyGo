@@ -2373,16 +2373,16 @@ func (m Model) View() tea.View {
 			}
 			var statusIcon string
 			if m.state.IsPlaying {
-				statusIcon = accent.Render("▶")
+				statusIcon = accent.Render("▶") + " "
 			} else {
-				statusIcon = secondary.Render("⏸")
+				statusIcon = secondary.Render("⏸") + "  "
 			}
 			currStr := muted.Render(duration(position))
 			totStr := muted.Render(duration(m.state.Item.DurationMS))
 
 			barW := max(6, min(48, rightW-ansi.StringWidth(statusIcon)-ansi.StringWidth(currStr)-ansi.StringWidth(totStr)-4))
 			fineBar := renderFineProgressBar(barW, fraction, m.state.IsPlaying, m.flowFrame, m.theme)
-			rightLines[3] = statusIcon + " " + currStr + " " + fineBar + " " + totStr
+			rightLines[3] = statusIcon + currStr + " " + fineBar + " " + totStr
 
 			// Row 4: Clean spacing without distracting bitrate text
 			rightLines[4] = ""
@@ -2853,28 +2853,18 @@ func (m Model) View() tea.View {
 	if baseBg == "" {
 		baseBg = "#0c0d0e"
 	}
-	isLight := m.theme.IsLight()
 
 	switch m.bgMode {
 	case "flow":
-		// Animated dynamic gradient flow
-		topColor := "#16161a"
-		secColor := "#101014"
-		if isLight {
-			topColor = "#f1f5f9"
-			secColor = "#e2e8f0"
-		}
+		// Animated dynamic gradient flow with guaranteed high contrast
+		topColor := LerpHex("#27272a", baseBg, 0.50)
+		secColor := baseBg
 		if m.coverData != nil && m.coverData.DominantHex != "" {
-			if isLight {
-				topColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.70)
-				secColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.85)
+			topColor = LerpHex(m.coverData.DominantHex, baseBg, 0.75)
+			if m.coverData.SecondaryHex != "" {
+				secColor = LerpHex(m.coverData.SecondaryHex, baseBg, 0.85)
 			} else {
-				topColor = m.coverData.DominantHex
-				if m.coverData.SecondaryHex != "" {
-					secColor = m.coverData.SecondaryHex
-				} else {
-					secColor = LerpHex(topColor, baseBg, 0.40)
-				}
+				secColor = LerpHex(topColor, baseBg, 0.50)
 			}
 		}
 		cycle := 60.0
@@ -2897,17 +2887,10 @@ func (m Model) View() tea.View {
 	case "default", "gradient":
 		fallthrough
 	default:
-		// Default: Vertical gradient reactive to album cover
-		topColor := "#141418"
-		if isLight {
-			topColor = "#f1f5f9"
-		}
+		// Default: Vertical gradient reactive to album cover with guaranteed high contrast
+		topColor := LerpHex("#27272a", baseBg, 0.50)
 		if m.coverData != nil && m.coverData.DominantHex != "" {
-			if isLight {
-				topColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.72)
-			} else {
-				topColor = m.coverData.DominantHex
-			}
+			topColor = LerpHex(m.coverData.DominantHex, baseBg, 0.75)
 		}
 		totalLines := len(lines)
 		for i := 0; i < totalLines; i++ {

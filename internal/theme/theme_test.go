@@ -19,20 +19,16 @@ func TestThemeGet(t *testing.T) {
 
 func TestAllThemes(t *testing.T) {
 	themes := All()
-	if len(themes) != 5 {
-		t.Fatalf("expected 5 themes, got %d", len(themes))
+	if len(themes) != 4 {
+		t.Fatalf("expected 4 themes, got %d", len(themes))
 	}
 }
 
 func TestThemeIsLight(t *testing.T) {
-	light := Get("light-minimal")
-	if !light.IsLight() {
-		t.Fatal("expected light-minimal to be light")
-	}
-
-	dark := Get("spotify-dark")
-	if dark.IsLight() {
-		t.Fatal("expected spotify-dark not to be light")
+	for _, th := range All() {
+		if th.IsLight() {
+			t.Fatalf("expected all themes to be dark, but %s is light", th.ID)
+		}
 	}
 }
 

@@ -112,28 +112,18 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	lines := make([]string, targetHeight)
 
 	// 1. Background color palette
-	isLight := m.theme.IsLight()
 	bgBase := m.theme.BgBase
 	if bgBase == "" {
 		bgBase = "#080808"
 	}
-	topColor := "#141418"
-	secColor := "#101014"
-	if isLight {
-		topColor = "#f1f5f9"
-		secColor = "#e2e8f0"
-	}
+	topColor := LerpHex("#27272a", bgBase, 0.50)
+	secColor := bgBase
 	if m.coverData != nil && m.coverData.DominantHex != "" {
-		if isLight {
-			topColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.70)
-			secColor = LerpHex(m.coverData.DominantHex, "#ffffff", 0.85)
+		topColor = LerpHex(m.coverData.DominantHex, bgBase, 0.75)
+		if m.coverData.SecondaryHex != "" {
+			secColor = LerpHex(m.coverData.SecondaryHex, bgBase, 0.85)
 		} else {
-			topColor = m.coverData.DominantHex
-			if m.coverData.SecondaryHex != "" {
-				secColor = m.coverData.SecondaryHex
-			} else {
-				secColor = LerpHex(topColor, bgBase, 0.40)
-			}
+			secColor = LerpHex(topColor, bgBase, 0.50)
 		}
 	}
 	if m.bgMode == "dark" {
@@ -187,9 +177,6 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 
 	// Audio-reactive rhythm border: subtle breathing with music pulse (~115 BPM)
 	borderBaseTone := "#52525b"
-	if isLight {
-		borderBaseTone = m.theme.Border
-	}
 	borderColor := computeRhythmBorderColor(LerpHex(topColor, borderBaseTone, 0.35), m.state.IsPlaying, position, m.flowFrame)
 	boxBorder := lipgloss.NewStyle().Foreground(lipgloss.Color(borderColor))
 
@@ -216,10 +203,6 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 			alpha := (twinkle - 0.15) / 0.85
 			starColor := s.color
 			starBase := "#ffffff"
-			if isLight {
-				starColor = m.theme.Accent
-				starBase = bgBase
-			}
 			starsAtRow[sy] = append(starsAtRow[sy], starPoint{
 				x:     sx,
 				char:  s.char,

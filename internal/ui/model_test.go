@@ -985,23 +985,23 @@ func TestPlayerCardInlineIconAndNoReproduciendo(t *testing.T) {
 		},
 	}
 
-	// 1. When playing, the card should contain the play icon inline
+	// 1. When playing, the card should contain the play icon inline with trailing space
 	viewPlaying := m.View()
 	strippedPlaying := ansi.Strip(viewPlaying.Content)
-	if !strings.Contains(strippedPlaying, "▶") {
-		t.Fatal("expected play icon ▶ in player card")
+	if !strings.Contains(strippedPlaying, "▶ ") {
+		t.Fatal("expected play icon '▶ ' with space in player card")
 	}
 	// The word "Reproduciendo" should NOT appear in the player card
 	if strings.Contains(strippedPlaying, "Reproduciendo") {
 		t.Fatal("did NOT expect 'Reproduciendo' text in player card")
 	}
 
-	// 2. When paused, the card should contain the pause icon inline
+	// 2. When paused, the card should contain the pause icon with double space for wide emoji compatibility
 	m.state.IsPlaying = false
 	viewPaused := m.View()
 	strippedPaused := ansi.Strip(viewPaused.Content)
-	if !strings.Contains(strippedPaused, "⏸") {
-		t.Fatal("expected pause icon ⏸ in player card")
+	if !strings.Contains(strippedPaused, "⏸  ") {
+		t.Fatal("expected pause icon '⏸  ' with spacing for emoji in player card")
 	}
 	if strings.Contains(strippedPaused, "En pausa") {
 		t.Fatal("did NOT expect 'En pausa' text inside the player card")
@@ -1411,10 +1411,10 @@ func TestHotkeysAndMute(t *testing.T) {
 	}
 }
 
-func TestPinnedFooterAndLightTheme(t *testing.T) {
+func TestPinnedFooterAndHighContrastTheme(t *testing.T) {
 	m := New(nil, "PC", nil, nil)
 	m.width, m.height = 100, 24
-	m.theme = theme.Get("light-minimal")
+	m.theme = theme.Get("cyberpunk")
 
 	view := m.View()
 	lines := strings.Split(view.Content, "\n")
@@ -1428,7 +1428,7 @@ func TestPinnedFooterAndLightTheme(t *testing.T) {
 		t.Fatalf("expected footer with shortcuts on last line, got: %q", lastLine)
 	}
 
-	// Verify background applied is light (F8FAFC)
+	// Verify background applied is truecolor escape sequences
 	if !strings.Contains(lines[0], "\x1b[48;2;") {
 		t.Fatal("expected background truecolor escape sequences in line")
 	}
