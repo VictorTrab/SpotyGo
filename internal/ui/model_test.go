@@ -1528,15 +1528,28 @@ func TestRightAlignedVisualizerAndFineProgressBar(t *testing.T) {
 		t.Fatal("expected fine progress bar pulsing knob '●' in view")
 	}
 
-	// Check right equalizer rows
-	eqRows := renderRightEqualizer(true, 5, m.theme)
-	if len(eqRows) != 5 {
-		t.Fatalf("expected 5 equalizer rows, got %d", len(eqRows))
+	// Verify 320k hq · stereo was removed from the card
+	if strings.Contains(view.Content, "320k hq · stereo") {
+		t.Fatal("did not expect '320k hq · stereo' in playback card")
 	}
-	for i, row := range eqRows {
-		if row == "" {
-			t.Fatalf("row %d of equalizer should not be empty", i)
-		}
+}
+
+func TestLikedTracksSingleHeart(t *testing.T) {
+	m := New(nil, "PC", nil, nil)
+	m.width, m.height = 100, 24
+	m.menuTransActive = false
+	m.playlists = []spotify.Playlist{
+		{ID: spotify.LikedTracksID, Name: "Canciones que te gustan"},
+		{ID: "p2", Name: "♥ Canciones que te gustan"},
+	}
+
+	view := m.View()
+	stripped := ansi.Strip(view.Content)
+	if strings.Contains(stripped, "♥ ♥") {
+		t.Fatalf("expected single heart for liked tracks, but found duplicated '♥ ♥' in view:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "♥ Canciones que te gustan") {
+		t.Fatalf("expected '♥ Canciones que te gustan' in view, got:\n%s", stripped)
 	}
 }
 

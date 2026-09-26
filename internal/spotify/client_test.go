@@ -44,7 +44,7 @@ func TestPlaylistsPrependsLikedTracks(t *testing.T) {
 	liked := Playlist{
 		ID:   LikedTracksID,
 		URI:  "spotify:user-liked-tracks",
-		Name: "♥ Canciones que te gustan",
+		Name: "Canciones que te gustan",
 	}
 	page.Items = append([]Playlist{liked}, page.Items...)
 	page.Total++

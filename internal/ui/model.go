@@ -2380,23 +2380,12 @@ func (m Model) View() tea.View {
 			currStr := muted.Render(duration(position))
 			totStr := muted.Render(duration(m.state.Item.DurationMS))
 
-			useEq := rightW >= 42
-			eqW := 15
-			infoW := rightW
-			if useEq {
-				infoW = rightW - eqW - 2
-			}
-
-			barW := max(6, min(36, infoW-ansi.StringWidth(statusIcon)-ansi.StringWidth(currStr)-ansi.StringWidth(totStr)-4))
+			barW := max(6, min(48, rightW-ansi.StringWidth(statusIcon)-ansi.StringWidth(currStr)-ansi.StringWidth(totStr)-4))
 			fineBar := renderFineProgressBar(barW, fraction, m.state.IsPlaying, m.flowFrame, m.theme)
 			rightLines[3] = statusIcon + " " + currStr + " " + fineBar + " " + totStr
 
-			// Row 4: Quality & status details
-			if m.state.IsPlaying {
-				rightLines[4] = muted.Render("320k hq · stereo")
-			} else {
-				rightLines[4] = ""
-			}
+			// Row 4: Clean spacing without distracting bitrate text
+			rightLines[4] = ""
 		} else {
 			rightLines[0] = bright.Render("SpotifyGo")
 			rightLines[1] = muted.Render("Listo para reproducir música")
@@ -2405,24 +2394,9 @@ func (m Model) View() tea.View {
 			rightLines[4] = secondary.Render("Atajos: '?' ayuda · 'S' buscar")
 		}
 
-		eqRows := renderRightEqualizer(m.state.IsPlaying, m.flowFrame, m.theme)
-		useEq := rightW >= 42
-		eqW := 15
-		infoW := rightW
-		if useEq {
-			infoW = rightW - eqW - 2
-		}
-
 		for i := 0; i < 5; i++ {
 			cPart := coverLines[i] + "  "
-			var rPart string
-			if useEq {
-				infoPart := ansi.Truncate(rightLines[i], infoW, "…")
-				padInfo := max(0, infoW-ansi.StringWidth(infoPart))
-				rPart = infoPart + strings.Repeat(" ", padInfo) + "  " + eqRows[i]
-			} else {
-				rPart = ansi.Truncate(rightLines[i], rightW, "…")
-			}
+			rPart := ansi.Truncate(rightLines[i], rightW, "…")
 			pad := max(0, rightW-ansi.StringWidth(rPart))
 			lines = append(lines, fit(cardRow(cPart+rPart+strings.Repeat(" ", pad), width, cardBorder)))
 		}
@@ -2740,8 +2714,11 @@ func (m Model) View() tea.View {
 		start := listStart(m.playlistPick, len(m.playlists), rows)
 		for i := start; i < len(m.playlists) && i < start+rows; i++ {
 			p := m.playlists[i]
+			displayName := strings.TrimSpace(p.Name)
+			displayName = strings.TrimPrefix(displayName, "♥")
+			displayName = strings.TrimSpace(displayName)
 			icon := "• "
-			if strings.Contains(p.Name, "Canciones que te gustan") {
+			if strings.Contains(p.Name, "Canciones que te gustan") || p.ID == spotify.LikedTracksID {
 				icon = "♥ "
 			} else if strings.Contains(p.Name, "Radio") || strings.Contains(p.Name, "Mix") {
 				icon = "📻 "
@@ -2749,9 +2726,9 @@ func (m Model) View() tea.View {
 			isPick := (i == m.playlistPick)
 			var rowText string
 			if isPick {
-				rowText = bright.Render("› " + icon + p.Name)
+				rowText = bright.Render("› " + icon + displayName)
 			} else {
-				rowText = muted.Render("  " + icon + p.Name)
+				rowText = muted.Render("  " + icon + displayName)
 			}
 			if m.menuTransActive {
 				rowIdx := i - start
@@ -3249,74 +3226,6 @@ func renderFineProgressBar(barW int, fraction float64, isPlaying bool, frame int
 	return sb.String()
 }
 
-func renderRightEqualizer(isPlaying bool, frame int, th theme.Theme) [5]string {
-	var rows [5]string
-	topCol := th.WaveTop
-	if topCol == "" {
-		topCol = th.Accent
-	}
-	botCol := th.WaveBot
-	if botCol == "" {
-		botCol = th.Secondary
-	}
-	dimCol := th.Dim
-	if dimCol == "" {
-		dimCol = "#475569"
-	}
-
-	// 8 dancing frequency bands (total width: 8 chars + 7 spaces = 15 chars)
-	var heights [8]float64
-	if isPlaying {
-		for i := 0; i < 8; i++ {
-			f := float64(frame) * 0.28
-			idx := float64(i)
-			v1 := math.Sin(f + idx*0.75)
-			v2 := math.Cos(f*1.4 - idx*0.5)
-			v3 := math.Sin(f*0.6 + idx*1.3)
-			val := 0.45 + 0.28*v1 + 0.17*v2 + 0.10*v3
-			boost := 1.15 - 0.25*math.Abs(idx-3.5)/4.0
-			h := val * 5.0 * boost
-			heights[i] = max(0.4, min(5.0, h))
-		}
-	} else {
-		for i := 0; i < 8; i++ {
-			heights[i] = 0.6
-		}
-	}
-
-	chars := []string{" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
-
-	for r := 0; r < 5; r++ {
-		thresh := float64(5 - r)
-		var sb strings.Builder
-		rowColor := LerpHex(topCol, botCol, float64(r)/4.0)
-		if !isPlaying {
-			rowColor = dimCol
-		}
-		st := lipgloss.NewStyle().Foreground(lipgloss.Color(rowColor))
-
-		for i := 0; i < 8; i++ {
-			h := heights[i]
-			var ch string
-			if h >= thresh {
-				ch = "█"
-			} else if h > thresh-1.0 {
-				frac := h - (thresh - 1.0)
-				idx := int(frac * 8.0)
-				idx = max(0, min(8, idx))
-				ch = chars[idx]
-			} else {
-				ch = " "
-			}
-			sb.WriteString(st.Render(ch))
-			if i < 7 {
-				sb.WriteString(" ")
-			}
-		}
-		rows[r] = sb.String()
-	}
-	return rows
-}
 
 func renderSweptRow(content string, itemIdx int, transFrame int, isPick bool, accent, muted lipgloss.Style) string {
 	if transFrame >= 8 {
