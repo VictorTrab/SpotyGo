@@ -78,6 +78,14 @@ type playlistEntriesMsg struct {
 
 type introTickMsg struct{}
 type zenTickMsg struct{ epoch int }
+type zenMeteorStartMsg struct {
+	epoch int
+	at    time.Time
+}
+type zenMeteorFrameMsg struct {
+	epoch int
+	at    time.Time
+}
 type zenTransitionTickMsg struct{ epoch int }
 type playbackTickMsg struct{ epoch int }
 type toastExpireMsg struct{ seq int }
@@ -130,6 +138,13 @@ type Model struct {
 	zenFrame                   int
 	zenClockEpoch              int
 	zenTickScheduled           bool
+	zenMeteorClockEpoch        int
+	zenMeteorStartScheduled    bool
+	zenMeteorFrameScheduled    bool
+	zenMeteorActive            bool
+	zenMeteorStartedAt         time.Time
+	zenMeteorElapsed           time.Duration
+	zenMeteorCycle             int
 	playbackClockEpoch         int
 	playbackTickScheduled      bool
 	zenPrevTrackID             string
@@ -322,6 +337,8 @@ func (m *Model) triggerToast(msg string, durationTicks int) tea.Cmd {
 const (
 	zenAnimationInterval    = 120 * time.Millisecond
 	zenTransitionInterval   = 33 * time.Millisecond
+	zenMeteorInterval       = ssCycleTime
+	zenMeteorFrameInterval  = ssFrameTime
 	playbackRefreshInterval = time.Second
 )
 
@@ -339,6 +356,34 @@ func (m *Model) reconcileClocks() []tea.Cmd {
 		cmds = append(cmds, tea.Tick(zenAnimationInterval, func(time.Time) tea.Msg {
 			return zenTickMsg{epoch: epoch}
 		}))
+	}
+	if !zenActive && (m.zenMeteorStartScheduled || m.zenMeteorFrameScheduled || m.zenMeteorActive) {
+		m.zenMeteorStartScheduled = false
+		m.zenMeteorFrameScheduled = false
+		m.zenMeteorActive = false
+		m.zenMeteorStartedAt = time.Time{}
+		m.zenMeteorElapsed = 0
+		m.zenMeteorClockEpoch++
+	}
+	if zenActive {
+		if !m.zenMeteorStartScheduled {
+			// Start a fresh 8-second cadence on entry to Zen or after focus returns.
+			if !m.zenMeteorActive && !m.zenMeteorFrameScheduled {
+				m.zenMeteorClockEpoch++
+			}
+			epoch := m.zenMeteorClockEpoch
+			m.zenMeteorStartScheduled = true
+			cmds = append(cmds, tea.Tick(zenMeteorInterval, func(at time.Time) tea.Msg {
+				return zenMeteorStartMsg{epoch: epoch, at: at}
+			}))
+		}
+		if m.zenMeteorActive && !m.zenMeteorFrameScheduled {
+			epoch := m.zenMeteorClockEpoch
+			m.zenMeteorFrameScheduled = true
+			cmds = append(cmds, tea.Tick(zenMeteorFrameInterval, func(at time.Time) tea.Msg {
+				return zenMeteorFrameMsg{epoch: epoch, at: at}
+			}))
+		}
 	}
 	transitionActive := zenActive && m.zenTransActive
 	if !transitionActive && m.zenTransitionTickScheduled {
@@ -1007,6 +1052,31 @@ func (m Model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			nextEvt := *m.prefetchedTrack
 			m.prefetchedTrack = nil
 			return m.applyTrackTransition(nextEvt)
+		}
+		return m, nil
+	case zenMeteorStartMsg:
+		if !m.zenMeteorStartScheduled || msg.epoch != m.zenMeteorClockEpoch || !m.isFocused || m.currentView != viewCoverArt {
+			return m, nil
+		}
+		m.zenMeteorStartScheduled = false
+		m.zenMeteorActive = true
+		m.zenMeteorStartedAt = msg.at
+		m.zenMeteorElapsed = 0
+		m.zenMeteorCycle++
+		return m, nil
+	case zenMeteorFrameMsg:
+		if !m.zenMeteorFrameScheduled || msg.epoch != m.zenMeteorClockEpoch || !m.zenMeteorActive || !m.isFocused || m.currentView != viewCoverArt {
+			return m, nil
+		}
+		m.zenMeteorFrameScheduled = false
+		m.zenMeteorElapsed = msg.at.Sub(m.zenMeteorStartedAt)
+		if m.zenMeteorElapsed < 0 {
+			m.zenMeteorElapsed = 0
+		}
+		if m.zenMeteorElapsed >= ssFlightTime {
+			m.zenMeteorActive = false
+			m.zenMeteorElapsed = 0
+			m.zenMeteorStartedAt = time.Time{}
 		}
 		return m, nil
 	case zenTransitionTickMsg:
@@ -2294,27 +2364,40 @@ func (m Model) View() tea.View {
 	innerW := max(20, width-4)
 
 	if height >= 22 {
-		// 5-line Card Layout (with Album Cover on the left + Album/Year metadata)
-		coverAreaW := 12 // 10 chars cover + 2 spaces
+		// High-resolution card layout with a larger square album cover.
+		coverAreaW := CoverWidthChars + 2
 		rightW := max(10, innerW-coverAreaW)
 
-		var coverLines []string
-		if m.coverData != nil && len(m.coverData.Lines) == 5 {
-			coverLines = m.coverData.Lines
+		coverLines := make([]string, CoverHeightChars)
+		if m.coverData != nil && len(m.coverData.Lines) > 0 {
+			copyAt := max(0, (CoverHeightChars-len(m.coverData.Lines))/2)
+			copy(coverLines[copyAt:], m.coverData.Lines)
 		} else {
-			coverLines = []string{
-				muted.Render("┌────────┐"),
-				muted.Render("│   ♫    │"),
-				muted.Render("│ SPOTIFY│"),
-				muted.Render("│   ♪    │"),
-				muted.Render("└────────┘"),
+			innerCoverW := max(0, CoverWidthChars-2)
+			for i := range coverLines {
+				switch i {
+				case 0:
+					coverLines[i] = muted.Render("┌" + strings.Repeat("─", innerCoverW) + "┐")
+				case CoverHeightChars - 1:
+					coverLines[i] = muted.Render("└" + strings.Repeat("─", innerCoverW) + "┘")
+				case CoverHeightChars / 2:
+					label := "SPOTYGO"
+					if len(label) > innerCoverW {
+						label = label[:innerCoverW]
+					}
+					left := max(0, (innerCoverW-len(label))/2)
+					coverLines[i] = muted.Render("│" + strings.Repeat(" ", left) + label + strings.Repeat(" ", max(0, innerCoverW-left-len(label))) + "│")
+				default:
+					coverLines[i] = muted.Render("│" + strings.Repeat(" ", innerCoverW) + "│")
+				}
 			}
 		}
 
-		var rightLines [5]string
+		rightLines := make([]string, CoverHeightChars)
+		textOffset := max(0, (CoverHeightChars-5)/2)
 		if m.state.Item != nil {
-			// Row 0: Title
-			rightLines[0] = bright.Render(m.state.Item.Name)
+			// Center the five lines of track information beside the larger cover.
+			rightLines[textOffset] = bright.Render(m.state.Item.Name)
 
 			// Row 1: Artists
 			var names []string
@@ -2325,7 +2408,7 @@ func (m Model) View() tea.View {
 			if len(names) > 0 {
 				artistStr = strings.Join(names, ", ")
 			}
-			rightLines[1] = secondary.Render(artistStr)
+			rightLines[textOffset+1] = secondary.Render(artistStr)
 
 			// Row 2: Album & Year
 			albumYear := ""
@@ -2335,7 +2418,7 @@ func (m Model) View() tea.View {
 					albumYear += " · " + yr
 				}
 			}
-			rightLines[2] = muted.Render(albumYear)
+			rightLines[textOffset+2] = muted.Render(albumYear)
 
 			// Row 3: Play/Pause Icon + Fine Progress Bar
 			position := m.currentPositionMS()
@@ -2354,21 +2437,21 @@ func (m Model) View() tea.View {
 			totStr := muted.Render(duration(m.state.Item.DurationMS))
 
 			// Row 3: Vertical breathing room between album and progress bar
-			rightLines[3] = ""
+			rightLines[textOffset+3] = ""
 
 			// Row 4: Play/Pause Icon + Fine Progress Bar
 			barW := max(6, min(48, rightW-ansi.StringWidth(statusIcon)-ansi.StringWidth(currStr)-ansi.StringWidth(totStr)-4))
 			fineBar := renderFineProgressBar(barW, fraction, m.state.IsPlaying, m.theme)
-			rightLines[4] = statusIcon + currStr + " " + fineBar + " " + totStr
+			rightLines[textOffset+4] = statusIcon + currStr + " " + fineBar + " " + totStr
 		} else {
-			rightLines[0] = bright.Render("SpotifyGo")
-			rightLines[1] = muted.Render("Listo para reproducir música")
-			rightLines[2] = muted.Render("Selecciona una playlist para comenzar")
-			rightLines[3] = ""
-			rightLines[4] = muted.Render("────────────────────────")
+			rightLines[textOffset] = bright.Render("SpotifyGo")
+			rightLines[textOffset+1] = muted.Render("Listo para reproducir música")
+			rightLines[textOffset+2] = muted.Render("Selecciona una playlist para comenzar")
+			rightLines[textOffset+3] = ""
+			rightLines[textOffset+4] = muted.Render("────────────────────────")
 		}
 
-		for i := 0; i < 5; i++ {
+		for i := 0; i < CoverHeightChars; i++ {
 			cPart := coverLines[i] + "  "
 			rPart := ansi.Truncate(rightLines[i], rightW, "…")
 			pad := max(0, rightW-ansi.StringWidth(rPart))

@@ -117,7 +117,7 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	// 2. Responsive square cover dimensions
 	// Reserve 6 rows for: 2 borders, 1 blank, 1 track, 1 artist, 1 fuse bar
 	maxCoverH := targetHeight - 8
-	coverH := min(16, max(8, maxCoverH))
+	coverH := min(20, max(8, maxCoverH))
 	coverW := coverH * 2
 	if coverW > width-8 {
 		coverW = max(16, ((width-8)/2)*2)
@@ -169,12 +169,15 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 	padLeftBar := strings.Repeat(" ", padLeftBarW)
 
 	// 5. Star coordinates lookup mapped to screen grid
-	type starPoint struct {
-		x     int
-		char  rune
-		color string
-	}
 	starsAtRow := make(map[int][]starPoint)
+	// Shooting star first so it wins x-ties with static stars.
+	if m.zenMeteorActive {
+		for _, st := range computeShootingStarPointsAt(m.zenMeteorElapsed, m.zenMeteorCycle, width, targetHeight, func(y int) string {
+			return canvas.RowColor(normalizedRow(y, targetHeight))
+		}) {
+			starsAtRow[st.y] = append(starsAtRow[st.y], st)
+		}
+	}
 	for _, s := range zenStars {
 		sy := int(s.yRatio * float64(targetHeight))
 		sx := int(s.xRatio * float64(width))
@@ -185,6 +188,7 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 			starBase := "#ffffff"
 			starsAtRow[sy] = append(starsAtRow[sy], starPoint{
 				x:     sx,
+				y:     sy,
 				char:  s.char,
 				color: LerpHex(starBase, starColor, alpha),
 			})
@@ -193,7 +197,7 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 
 	// Sort each row's stars by X to guarantee left-to-right rendering
 	for r := range starsAtRow {
-		sort.Slice(starsAtRow[r], func(i, j int) bool {
+		sort.SliceStable(starsAtRow[r], func(i, j int) bool {
 			return starsAtRow[r][i].x < starsAtRow[r][j].x
 		})
 	}

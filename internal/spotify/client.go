@@ -66,15 +66,25 @@ func (t Track) ReleaseYear() string {
 	return ""
 }
 
-// CoverURL returns the best album cover image URL (preferring medium size ~300px or fallback to first image).
+// CoverURL returns the largest available album cover image URL.
 func (t Track) CoverURL() string {
 	if len(t.Album.Images) == 0 {
 		return ""
 	}
+	var best Image
+	var bestArea int64
 	for _, img := range t.Album.Images {
-		if img.Width >= 200 && img.Width <= 400 && img.URL != "" {
-			return img.URL
+		if img.URL == "" {
+			continue
 		}
+		area := int64(img.Width) * int64(img.Height)
+		if best.URL == "" || area > bestArea || (area == bestArea && img.Width > best.Width) {
+			best = img
+			bestArea = area
+		}
+	}
+	if best.URL != "" {
+		return best.URL
 	}
 	return t.Album.Images[0].URL
 }

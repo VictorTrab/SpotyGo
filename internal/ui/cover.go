@@ -23,10 +23,10 @@ import (
 )
 
 const (
-	CoverWidthChars     = 10
-	CoverHeightChars    = 5
-	BigCoverWidthChars  = 30
-	BigCoverHeightChars = 15
+	CoverWidthChars     = 14
+	CoverHeightChars    = 7
+	BigCoverWidthChars  = 40
+	BigCoverHeightChars = 20
 )
 
 type CoverData struct {

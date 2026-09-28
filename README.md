@@ -56,8 +56,8 @@ Visualización inmersiva con carátula TrueColor ampliada y cielo nocturno con e
 ## Características Principales
 
 - **Reproducción Nativa de Alta Fidelidad (HQ 320k):** Motor de streaming integrado con calidad fija de 320k.
-- **Carátulas TrueColor en ANSI (`▀`):** Rasterizador de semibloques que despliega carátulas nítidas directamente en la terminal.
-- **Modo Zen Sanctuary (`z`):** Experiencia minimalista con carátula ampliada y un cielo de estrellas vivas generadas proceduralmente.
+- **Carátulas TrueColor en ANSI (`▀`):** Selección de la imagen de mayor resolución y renderizado adaptable para mostrar más detalle en la terminal.
+- **Modo Zen Sanctuary (`z`):** Experiencia minimalista con carátula ampliada y un cielo de estrellas vivas y fugaces en cuatro direcciones.
 - **Fondos independientes por modo:** La interfaz normal es estática para evitar repintados decorativos; `gradient` usa los colores de la carátula y `dark` el fondo del tema. `flow` conserva su animación y solo se mueve en Zen, con su propio reloj; la paleta mantiene el contraste del texto (WCAG ≥ 4.5:1).
 - **Sincronización Remota Instantánea:** Sondeo adaptativo del estado de reproducción con sondeo de frontera y refresco al pulsar una tecla, de modo que una canción cambiada desde el teléfono aparece en segundos.
 - **Caché en 2 Niveles (0.0 ms):** Sistema de almacenamiento en memoria RAM y disco SSD para metadatos y carátulas. Cero llamadas redundantes y prevención de bloqueos HTTP 429.
