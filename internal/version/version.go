@@ -19,7 +19,7 @@ import (
 
 var (
 	// Version is the current semantic version of SpotifyGo.
-	Current = "v1.0.6"
+	Current = "v1.1.0"
 	// RepoOwner is the GitHub repository owner.
 	RepoOwner = "VictorTrab"
 	// RepoName is the GitHub repository name.
@@ -312,6 +312,15 @@ type Highlight struct {
 // RecentHighlights returns curated bullet points of recent updates.
 func RecentHighlights() []Highlight {
 	return []Highlight{
+		{
+			Version: "v1.1.0",
+			Tagline: "Carátulas más nítidas y estrellas fugaces en cuatro direcciones",
+			Points: []string{
+				"Se elige la carátula de mayor resolución disponible en Spotify",
+				"La tarjeta principal muestra portadas de 14 × 14 píxeles terminales y Zen se adapta hasta 40 × 40",
+				"Las estrellas fugaces recorren el cielo Zen en cuatro diagonales con la misma estela suave",
+			},
+		},
 		{
 			Version: "v1.0.6",
 			Tagline: "Zen independiente, flow controlado y sincronización precisa",
