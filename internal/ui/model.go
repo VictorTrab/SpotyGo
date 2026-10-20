@@ -145,6 +145,7 @@ type Model struct {
 	zenMeteorStartedAt         time.Time
 	zenMeteorElapsed           time.Duration
 	zenMeteorCycle             int
+	zenSkySeed                 int
 	playbackClockEpoch         int
 	playbackTickScheduled      bool
 	zenPrevTrackID             string
@@ -223,6 +224,8 @@ func (m *Model) triggerZenTransition() {
 	m.zenTransActive = true
 	m.zenTransFrame = 0
 	m.zenPrevImage = nil // Reset so it NEVER flashes the old cover when toggling Zen!
+	m.zenSkySeed++
+	m.zenMeteorCycle += 3
 }
 
 func (m *Model) setView(v viewMode) {
@@ -274,23 +277,26 @@ func New(client *spotify.Client, localName string, engineDone <-chan error, engi
 		bgMode = "flow"
 	}
 
+	seedBase := int(time.Now().UnixNano() & 0xffff)
 	m := Model{
-		client:        client,
-		localName:     localName,
-		engineDone:    engineDone,
-		engineEvents:  engineEvents,
-		volumeEvents:  volEvts,
-		bitrate:       bitrate,
-		bgMode:        bgMode,
-		isFocused:     true,
-		width:         80,
-		height:        24,
-		progress:      bar,
-		theme:         th,
-		themeList:     allThemes,
-		themeSelected: initialSelected,
-		entriesCache:  make(map[string][]spotify.PlaylistEntry),
-		bigCoverCache: make(map[string][]string),
+		client:         client,
+		localName:      localName,
+		engineDone:     engineDone,
+		engineEvents:   engineEvents,
+		volumeEvents:   volEvts,
+		bitrate:        bitrate,
+		bgMode:         bgMode,
+		isFocused:      true,
+		width:          80,
+		height:         24,
+		progress:       bar,
+		theme:          th,
+		themeList:      allThemes,
+		themeSelected:  initialSelected,
+		zenSkySeed:     seedBase,
+		zenMeteorCycle: seedBase & 0xff,
+		entriesCache:   make(map[string][]spotify.PlaylistEntry),
+		bigCoverCache:  make(map[string][]string),
 	}
 	m.setView(viewPlaylists)
 	return m

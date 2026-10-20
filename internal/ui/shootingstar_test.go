@@ -55,7 +55,7 @@ func TestShootingStarLifecycle(t *testing.T) {
 	}
 
 	for _, fr := range frameRuns {
-		if len(fr) != ssMinFlight || len(fr) != ssMaxFlight {
+		if len(fr) < ssMinFlight || len(fr) > ssMaxFlight {
 			t.Errorf("flight length %d, expected %d frames", len(fr), ssMinFlight)
 		}
 		pts := computeShootingStarPoints(fr[0], 120, 40, testAccent)

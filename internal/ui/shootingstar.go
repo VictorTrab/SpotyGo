@@ -76,23 +76,25 @@ func computeShootingStarPointsAt(elapsed time.Duration, cycle, width, height int
 		dySign = -1
 	}
 
-	startXOffset := hash01(cycleSeed*1.3+5) * math.Max(1, float64(width)*0.15)
+	startXOffset := hash01(cycleSeed*1.3+5) * math.Max(1, float64(width)*0.24)
 	startX := startXOffset
 	if dxSign < 0 {
 		startX = float64(width) - startXOffset
 	}
-	startYOffset := float64(int(hash01(cycleSeed*1.7+6) * 2))
+	maxStartY := math.Max(2, math.Min(5, float64(height)*0.16))
+	startYOffset := float64(int(hash01(cycleSeed*1.7+6) * maxStartY))
 	startY := startYOffset
 	verticalSpan := float64(height) - startYOffset
 	if dySign < 0 {
 		startY = float64(height-1) - startYOffset
 		verticalSpan = startY + 1
 	}
-	speed := verticalSpan / (math.Sin(ssAngle) * float64(ssFlightTime/time.Millisecond))
+	cycleAngle := 0.33 + hash01(cycleSeed*3.1+19)*0.07
+	speed := verticalSpan / (math.Sin(cycleAngle) * float64(ssFlightTime/time.Millisecond))
 	speed = math.Max(ssSpeedMin, math.Min(ssSpeedMax, speed))
 	distance := float64(elapsed/time.Millisecond) * speed
-	dx := dxSign * math.Cos(ssAngle)
-	dy := dySign * math.Sin(ssAngle)
+	dx := dxSign * math.Cos(cycleAngle)
+	dy := dySign * math.Sin(cycleAngle)
 	headX := startX + distance*dx
 	headY := startY + distance*dy
 	envelope := math.Sin((float64(elapsed) / float64(ssFlightTime)) * math.Pi)
