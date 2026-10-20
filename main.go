@@ -268,6 +268,12 @@ func formatMillis(ms int) string {
 }
 
 func configPath() (string, error) {
+	if cacheDir, err := os.UserCacheDir(); err == nil {
+		p := filepath.Join(cacheDir, "SpotifyGo", "config.json")
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("encontrar configuración de usuario: %w", err)

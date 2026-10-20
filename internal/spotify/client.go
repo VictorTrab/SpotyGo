@@ -390,29 +390,27 @@ func (c *Client) Reauth(ctx context.Context) error {
 
 // reserve spaces requests across concurrent UI commands and applies 429 backoff.
 func (c *Client) reserve(ctx context.Context) error {
-	c.mu.Lock()
-	start := time.Now()
-	if c.next.After(start) {
-		start = c.next
-	}
-	if c.blockedUntil.After(start) {
-		start = c.blockedUntil
-	}
-	c.next = start.Add(150 * time.Millisecond)
-	c.mu.Unlock()
-	if err := waitUntil(ctx, start); err != nil {
-		return err
-	}
-	// A 429 can arrive while this request is waiting in the queue.
 	for {
 		c.mu.Lock()
-		blocked := c.blockedUntil
-		c.mu.Unlock()
-		if !blocked.After(time.Now()) {
-			return nil
+		start := time.Now()
+		if c.next.After(start) {
+			start = c.next
 		}
-		if err := waitUntil(ctx, blocked); err != nil {
+		if c.blockedUntil.After(start) {
+			start = c.blockedUntil
+		}
+		c.next = start.Add(220 * time.Millisecond)
+		c.mu.Unlock()
+		if err := waitUntil(ctx, start); err != nil {
 			return err
+		}
+		// If a 429 arrived while this request was waiting, loop back and reserve
+		// a new staggered slot after blockedUntil instead of waking in a thundering herd.
+		c.mu.Lock()
+		stillBlocked := c.blockedUntil.After(time.Now())
+		c.mu.Unlock()
+		if !stillBlocked {
+			return nil
 		}
 	}
 }
@@ -476,15 +474,17 @@ func (c *Client) request(ctx context.Context, method, path string, payload any, 
 			wait := retryDelay(resp.Header.Get("Retry-After"))
 			logger.Warn("Spotify 429 Too Many Requests en %s %s; Retry-After=%s (intento %d/3)", method, path, wait, attempt+1)
 			c.mu.Lock()
-			until := time.Now().Add(wait)
+			// Add a 1.1s safety margin because Spotify truncates Retry-After to integer seconds;
+			// waking up 0.8s before the rolling 30s window closes would immediately trigger Retry-After=1s.
+			until := time.Now().Add(wait + 1100*time.Millisecond)
 			if until.After(c.blockedUntil) {
 				c.blockedUntil = until
 			}
+			if c.next.Before(c.blockedUntil) {
+				c.next = c.blockedUntil
+			}
 			c.mu.Unlock()
 			if attempt < 2 {
-				if waitErr := waitUntil(ctx, until); waitErr != nil {
-					return resp.StatusCode, waitErr
-				}
 				continue
 			}
 			logger.Error("Spotify 429 agotó reintentos en %s %s", method, path)
