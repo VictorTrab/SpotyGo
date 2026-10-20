@@ -744,7 +744,6 @@ func (c *Client) fetchOEmbedTrack(ctx context.Context, id string) (Track, error)
 		return Track{}, errors.New("oembed sin thumbnail_url")
 	}
 	return Track{
-		ID:   id,
 		URI:  "spotify:track:" + id,
 		Name: data.Title,
 		Album: Album{
