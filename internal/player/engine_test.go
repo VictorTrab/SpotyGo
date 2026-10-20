@@ -101,6 +101,10 @@ func TestParseTrackEvents(t *testing.T) {
 	if _, _, ok := parseTrackLoading("some random line"); ok {
 		t.Fatal("expected ok=false for random line in parseTrackLoading")
 	}
+	skipErrLine := `[2026-10-20T00:02:17Z ERROR librespot_playback::player] Skipping to next track, unable to load track <SpotifyUri("spotify:track:2TCy4SdgjE8SEdP0UQfPGs")>: ()`
+	if _, _, ok := parseTrackLoading(skipErrLine); ok {
+		t.Fatal("expected ok=false for error/skip line containing spotify:track: URI")
+	}
 	if _, _, ok := parseTrackLoaded("some random line"); ok {
 		t.Fatal("expected ok=false for random line in parseTrackLoaded")
 	}

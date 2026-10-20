@@ -104,7 +104,7 @@ func Start(optBitrate ...string) (*Engine, error) {
 	}
 	name := "SpotifyGo (" + computer + ")"
 	logger.Info("Iniciando motor de audio local librespot: %s con nombre %s (bitrate: %s kbps)", path, name, bitrate)
-	cmd := exec.Command(path, "--name", name, "--device-type", "computer", "--cache", filepath.Join(root, "cache"), "--enable-oauth", "--backend", "rodio", "--bitrate", bitrate, "--volume-ctrl", "linear")
+	cmd := exec.Command(path, "--name", name, "--device-type", "computer", "--cache", filepath.Join(root, "cache"), "--disable-audio-cache", "--enable-oauth", "--backend", "rodio", "--bitrate", bitrate, "--volume-ctrl", "linear")
 	cmd.Stdout = log
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
@@ -256,7 +256,7 @@ func (e *Engine) Restart(bitrate string) error {
 	}
 
 	logger.Info("Reiniciando motor librespot con bitrate: %s kbps", bitrate)
-	cmd := exec.Command(e.path, "--name", e.Name, "--device-type", "computer", "--cache", filepath.Join(e.root, "cache"), "--enable-oauth", "--backend", "rodio", "--bitrate", bitrate, "--volume-ctrl", "linear")
+	cmd := exec.Command(e.path, "--name", e.Name, "--device-type", "computer", "--cache", filepath.Join(e.root, "cache"), "--disable-audio-cache", "--enable-oauth", "--backend", "rodio", "--bitrate", bitrate, "--volume-ctrl", "linear")
 	cmd.Stdout = e.log
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
@@ -354,6 +354,14 @@ func (e *Engine) Stop() {
 // "Loading <Stay the Night> with Spotify URI <spotify:track:7zJnmSjZKjntHmOvEokGb3>"
 // or "Loading "Stay the Night" with Spotify URI "spotify:track:7zJnmSjZKjntHmOvEokGb3""
 func parseTrackLoading(line string) (name, uri string, ok bool) {
+	lower := strings.ToLower(line)
+	if !strings.Contains(lower, "loading ") ||
+		strings.Contains(lower, "unable to load") ||
+		strings.Contains(lower, "skipping to next") ||
+		strings.Contains(lower, " error ") {
+		return "", "", false
+	}
+
 	// Look for Spotify URI
 	uriIdx := strings.Index(line, "spotify:track:")
 	if uriIdx != -1 {
@@ -385,7 +393,7 @@ func parseTrackLoading(line string) (name, uri string, ok bool) {
 		}
 	}
 
-	if uri != "" || name != "" {
+	if name != "" {
 		return strings.TrimSpace(name), strings.TrimSpace(uri), true
 	}
 	return "", "", false

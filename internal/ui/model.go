@@ -629,6 +629,8 @@ func (m Model) applyTrackTransition(evt player.TrackEvent) (Model, tea.Cmd) {
 	m.coverData = nil
 	m.currentCoverURL = ""
 	m.bigCoverCache = make(map[string][]string)
+	m.stateEpoch++
+	m.lastTransport = time.Now()
 	m.state.ProgressMS = 0
 	m.lastSync = time.Now()
 	m.state.IsPlaying = true
@@ -979,8 +981,10 @@ func (m Model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state.Item != nil && m.state.Item.DurationMS > 0 {
 				remainingMS = m.state.Item.DurationMS - m.currentPositionMS()
 			}
+			recentlyStarted := m.state.Item != nil && m.state.Item.DurationMS == 0 &&
+				!m.lastSync.IsZero() && m.currentPositionMS() < 120000
 			isGaplessPrefetch := m.state.Item != nil && m.state.Item.URI != "" &&
-				m.state.IsPlaying && remainingMS > 4000 &&
+				m.state.IsPlaying && (remainingMS > 4000 || recentlyStarted) &&
 				!m.transportBusy && m.desiredPlaying == nil
 
 			if isGaplessPrefetch {
@@ -1039,11 +1043,15 @@ func (m Model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case tea.FocusMsg:
+		wasFocused := m.isFocused
 		m.isFocused = true
 		if m.introActive {
 			return m, tea.Batch(introTick(), m.fetchState())
 		}
-		return m, m.fetchState()
+		if !wasFocused {
+			return m, m.fetchState()
+		}
+		return m, nil
 	case tea.BlurMsg:
 		m.isFocused = false
 		// Window lost focus: zero CPU in background! Do not schedule ticks while unfocused.
@@ -1502,6 +1510,10 @@ func (m Model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{m.fetchState()}
 		if !m.localReady {
 			cmds = append(cmds, m.fetchDevices())
+		}
+		if len(m.playlists) == 0 && !m.playlistBusy && m.client != nil {
+			m.playlistBusy = true
+			cmds = append(cmds, m.fetchPlaylists(0))
 		}
 		cmds = append(cmds, pollAfter(m.pollDelay()))
 		return m, tea.Batch(cmds...)
