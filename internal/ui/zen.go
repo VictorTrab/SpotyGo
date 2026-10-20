@@ -279,50 +279,130 @@ func computeZenStarfieldPoints(
 	return points
 }
 
-// renderBurningFuse builds a minimalist burning fuse progress bar:
-// solid and firm at the tail, warming up to a glowing ember at the playback head,
-// with an incandescent flickering spark when playing, and subtle unburnt cord ahead.
-// Free of any timestamps, text, or emojis.
-func renderBurningFuse(fraction float64, barW int, isPlaying bool, frame int, accentHex string) string {
+// renderBurningFuse builds a minimalist progress bar inspired by the Braille
+// shooting star: a symmetrical 5-dot Braille diamond core at the playback head,
+// a clean single-axis tapering Braille wake along the played portion, and a
+// whisper-faint sparse single-dot Braille track ahead.
+func renderBurningFuse(fraction float64, barW int, isPlaying bool, frame int, accentHex string, rowBg ...string) string {
 	if barW <= 0 {
 		return ""
 	}
+	bgHex := "#0a0a0f"
+	if len(rowBg) > 0 && rowBg[0] != "" {
+		bgHex = rowBg[0]
+	}
+	if accentHex == "" {
+		accentHex = "#b4d7ff"
+	}
+
 	fraction = max(0.0, min(1.0, fraction))
-	headX := int(fraction * float64(barW))
-	if headX >= barW {
-		headX = barW - 1
-	}
-
-	// Spark color and character at the active burning tip
-	var sparkColor, sparkChar string
-	if isPlaying {
-		sparkSine := 0.5 + 0.5*math.Sin(float64(frame)*0.45)
-		sparkColor = LerpHex("#ffffff", "#fef08a", sparkSine)
-		sparkChar = "✦"
+	totalSubW := barW * 2
+	// Keep headSubX within [1, totalSubW-2] when possible so both left and right
+	// tips of the 5-dot Braille diamond always fit cleanly inside the bar.
+	headSubX := int(math.Round(fraction * float64(totalSubW-1)))
+	if totalSubW >= 4 {
+		headSubX = max(1, min(totalSubW-2, headSubX))
 	} else {
-		sparkColor = "#71717a"
-		sparkChar = "·"
+		headSubX = max(0, min(totalSubW-1, headSubX))
+	}
+	headCell := headSubX >> 1
+	rightTipCell := (headSubX + 1) >> 1
+
+	masks := make([]uint8, barW)
+	setSubpixel := func(subX, subY int) {
+		if subX < 0 || subX >= totalSubW || subY < 0 || subY >= 4 {
+			return
+		}
+		cellX := subX >> 1
+		bit := brailleBit(subX&1, subY&3)
+		masks[cellX] |= 1 << bit
 	}
 
+	// 1. Played wake: pure, single-axis horizontal Braille line (row 1 only)
+	// with zero lower-row belly so the trail stays razor-sharp and centered.
+	for sx := 0; sx <= headSubX; sx++ {
+		setSubpixel(sx, 1)
+	}
+
+	// 2. Symmetrical 5-dot Braille diamond centered at (headSubX, 1):
+	//    top:    (headSubX, 0)
+	//    middle: (headSubX-1, 1), (headSubX, 1), (headSubX+1, 1)
+	//    bottom: (headSubX, 2)
+	setSubpixel(headSubX-1, 1)
+	setSubpixel(headSubX, 0)
+	setSubpixel(headSubX, 1)
+	setSubpixel(headSubX, 2)
+	setSubpixel(headSubX+1, 1)
+
+	// 3. Unplayed path ahead: leave a 1-cell dark breathing gap in front of the
+	// diamond's right tip so the diamond point stands out crisply, then place
+	// sparse single Braille dots (1 dot per cell on row 1).
+	unplayedStartCell := rightTipCell + 2
+	for x := unplayedStartCell; x < barW; x++ {
+		setSubpixel(x*2, 1)
+	}
+
+	// Render each Braille cell with shooting-star wake color interpolation
 	var sb strings.Builder
+	pulse := 0.5 + 0.5*math.Sin(float64(frame)*0.45)
+
 	for x := 0; x < barW; x++ {
-		if x < headX {
-			// Solid burned fuse: gradient from solid base to glowing ember
-			t := float64(x) / float64(max(1, headX))
-			colorHex := LerpHex(accentHex, "#86efac", t*0.85)
-			style := lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex))
-			sb.WriteString(style.Render("━"))
-		} else if x == headX {
-			// Incandescent spark / ember tip
-			style := lipgloss.NewStyle().Foreground(lipgloss.Color(sparkColor)).Bold(isPlaying)
-			sb.WriteString(style.Render(sparkChar))
-		} else {
-			// Unburnt cord ahead: subtle dim line fading into darkness
-			t := float64(x-headX) / float64(max(1, barW-headX))
-			colorHex := LerpHex("#27272a", "#0f0f11", t*0.80)
-			style := lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex))
-			sb.WriteString(style.Render("─"))
+		if masks[x] == 0 {
+			sb.WriteString(" ")
+			continue
 		}
+		ch := rune(0x2800 + int(masks[x]))
+		var style lipgloss.Style
+
+		switch {
+		case x == headCell:
+			// Incandescent shooting-star diamond core
+			var headColor string
+			if isPlaying {
+				headColor = LerpHex(ssBeamGlow, ssBeamCore, 0.65+0.35*pulse)
+			} else {
+				headColor = "#e2e8f0"
+			}
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(headColor)).Bold(isPlaying)
+
+		case x == rightTipCell && rightTipCell > headCell:
+			// When the diamond's right tip (headSubX+1) crosses into the next cell,
+			// illuminate it with the bright leading halo so the diamond is never sliced flat.
+			var tipColor string
+			if isPlaying {
+				tipColor = LerpHex(ssBeamGlow, ssBeamCore, 0.45+0.35*pulse)
+			} else {
+				tipColor = "#cbd5e1"
+			}
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(tipColor)).Bold(isPlaying)
+
+		case x < headCell:
+			// Played Braille wake: shooting-star exponential glow near head (#ffffff -> #b4d7ff -> accent)
+			// tapering smoothly toward the tail start.
+			cellDist := float64(headCell - x)
+			progressT := float64(x) / float64(max(1, headCell))
+
+			// Base played gradient from soft luminous accent at start to vivid accent near head
+			tailColor := LerpHex(bgHex, accentHex, 0.46+0.48*math.Pow(progressT, 1.1))
+
+			// Overlay shooting-star icy wake (#b4d7ff -> #ffffff) on the 10 cells behind the head
+			const wakeSpan = 10.0
+			if cellDist <= wakeSpan {
+				wakeFade := math.Pow(1.0-cellDist/(wakeSpan+1.0), ssWakeFadeExp)
+				headBlend := math.Max(0, 1.0-cellDist/3.5)
+				beamColor := LerpHex(ssBeamGlow, ssBeamCore, headBlend*0.75)
+				tailColor = LerpHex(tailColor, beamColor, wakeFade)
+			}
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(tailColor))
+
+		default:
+			// Unplayed sparse Braille dots ahead: whisper-subtle guide dots (18%..11% above row background)
+			aheadT := float64(x-unplayedStartCell) / float64(max(1, barW-unplayedStartCell))
+			dimColor := LerpHex(bgHex, "#64748b", 0.20*(1.0-0.40*aheadT))
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(dimColor))
+		}
+
+		sb.WriteString(style.Render(string(ch)))
 	}
 	return sb.String()
 }
@@ -386,9 +466,10 @@ func (m Model) renderCoverArtZenView(width, height int, fit func(string) string)
 
 	coverLines := m.getBigCoverLines(coverW, coverH)
 
-	// 4. Burning Fuse Progress Bar
+	// 4. Shooting-Star Braille Progress Bar
 	barW := min(42, max(24, coverW))
-	fuseBar := renderBurningFuse(fraction, barW, m.state.IsPlaying, m.zenFrame, m.theme.Accent)
+	fuseRowBg := canvas.RowColor(normalizedRow(min(targetHeight-1, padTop+coverH+6), targetHeight))
+	fuseBar := renderBurningFuse(fraction, barW, m.state.IsPlaying, m.zenFrame, m.theme.Accent, fuseRowBg)
 	padLeftBarW := max(0, (width-barW)/2)
 	padLeftBar := strings.Repeat(" ", padLeftBarW)
 

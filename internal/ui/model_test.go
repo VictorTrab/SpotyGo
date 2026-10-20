@@ -1326,8 +1326,8 @@ func TestBigCoverArtViewAndToggle(t *testing.T) {
 	if !strings.Contains(stripped, "Drake") {
 		t.Fatal("expected artist 'Drake' in Big Cover Art view")
 	}
-	if !strings.Contains(stripped, "━") {
-		t.Fatal("expected burning fuse progress bar in Big Cover Art view")
+	if !strings.Contains(stripped, "⠒") {
+		t.Fatal("expected Braille shooting-star progress bar in Big Cover Art view")
 	}
 
 	// Playlists and header indicators should NOT be present (clean zen sanctuary!)
