@@ -629,7 +629,6 @@ func (m Model) applyTrackTransition(evt player.TrackEvent) (Model, tea.Cmd) {
 	m.coverData = nil
 	m.currentCoverURL = ""
 	m.bigCoverCache = make(map[string][]string)
-	m.stateEpoch++
 	m.lastTransport = time.Now()
 	m.state.ProgressMS = 0
 	m.lastSync = time.Now()
@@ -1023,8 +1022,18 @@ func (m Model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.track.DurationMS > 0 {
 				dur = msg.track.DurationMS
 			}
+			prevArtists := m.state.Item.Artists
+			prevAlbumName := m.state.Item.Album.Name
+			prevRelease := m.state.Item.Album.ReleaseDate
 			m.state.Item = &msg.track
 			m.state.Item.DurationMS = dur
+			if len(m.state.Item.Artists) == 0 && len(prevArtists) > 0 {
+				m.state.Item.Artists = prevArtists
+			}
+			if m.state.Item.Album.Name == "" && prevAlbumName != "" {
+				m.state.Item.Album.Name = prevAlbumName
+				m.state.Item.Album.ReleaseDate = prevRelease
+			}
 
 			var cmds []tea.Cmd
 			if coverCmd := m.checkCoverFetch(); coverCmd != nil {
@@ -1230,7 +1239,20 @@ func (m Model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case stateMsg:
 		m.stateFetching = false
+		if msg.err == nil && m.client != nil && msg.state.Item != nil {
+			m.client.CacheTrack(*msg.state.Item)
+		}
 		if msg.epoch < m.stateEpoch {
+			// Even if the state poll was started before an epoch bump, adopt its rich track
+			// metadata (artists, album, cover art) if it matches the currently active track!
+			if msg.err == nil && msg.state.Item != nil && m.state.Item != nil &&
+				(m.state.Item.URI == msg.state.Item.URI || strings.EqualFold(m.state.Item.Name, msg.state.Item.Name)) &&
+				len(m.state.Item.Album.Images) == 0 {
+				m.state.Item = msg.state.Item
+				if coverCmd := m.checkCoverFetch(); coverCmd != nil {
+					return m, coverCmd
+				}
+			}
 			return m, nil
 		}
 		if msg.err != nil {

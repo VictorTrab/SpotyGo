@@ -669,6 +669,8 @@ func (c *Client) Transfer(ctx context.Context, device Device) error {
 }
 
 // GetTrack fetches full metadata for a track by ID or Spotify URI (including artists, album name, release date, and cover images).
+// If the Spotify Web API is currently rate-limited (HTTP 429), it falls back immediately to Spotify's
+// public unauthenticated oEmbed endpoint so cover art still loads in <150ms without waiting or burning quota.
 func (c *Client) GetTrack(ctx context.Context, idOrURI string) (Track, error) {
 	var track Track
 	id := strings.TrimPrefix(idOrURI, "spotify:track:")
@@ -687,10 +689,70 @@ func (c *Client) GetTrack(ctx context.Context, idOrURI string) (Track, error) {
 		return cached, nil
 	}
 
+	if c.IsBlocked() {
+		if oembedTrack, oErr := c.fetchOEmbedTrack(ctx, id); oErr == nil {
+			return oembedTrack, nil
+		}
+	}
+
 	_, err := c.request(ctx, http.MethodGet, "/tracks/"+url.PathEscape(id), nil, &track)
 	if err != nil {
+		if oembedTrack, oErr := c.fetchOEmbedTrack(ctx, id); oErr == nil {
+			return oembedTrack, nil
+		}
 		return track, err
 	}
 	c.CacheTrack(track)
 	return track, nil
+}
+
+// fetchOEmbedTrack queries Spotify's public oEmbed endpoint (open.spotify.com/oembed),
+// which requires no OAuth token and is unaffected by api.spotify.com 429 rate limits,
+// to retrieve the track's cover art URL and title immediately.
+func (c *Client) fetchOEmbedTrack(ctx context.Context, id string) (Track, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	endpoint := "https://open.spotify.com/oembed?url=spotify:track:" + url.QueryEscape(id)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return Track{}, err
+	}
+	httpClient := c.http
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return Track{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Track{}, fmt.Errorf("oembed HTTP %d", resp.StatusCode)
+	}
+
+	var data struct {
+		Title           string `json:"title"`
+		ThumbnailURL    string `json:"thumbnail_url"`
+		ThumbnailWidth  int    `json:"thumbnail_width"`
+		ThumbnailHeight int    `json:"thumbnail_height"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&data); err != nil {
+		return Track{}, err
+	}
+	if data.ThumbnailURL == "" {
+		return Track{}, errors.New("oembed sin thumbnail_url")
+	}
+	return Track{
+		ID:   id,
+		URI:  "spotify:track:" + id,
+		Name: data.Title,
+		Album: Album{
+			Images: []Image{{
+				URL:    data.ThumbnailURL,
+				Width:  data.ThumbnailWidth,
+				Height: data.ThumbnailHeight,
+			}},
+		},
+	}, nil
 }
