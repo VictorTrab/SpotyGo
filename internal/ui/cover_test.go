@@ -172,6 +172,65 @@ func TestZenStarrySkyTwinkle(t *testing.T) {
 			t.Errorf("star %d missing color", i)
 		}
 	}
+
+	// Verify procedural stratified jittered grid starfield & cycle-based relocation
+	width, height := 120, 40
+	excl := zenExclusionZone{
+		coverLeft: 38, coverRight: 82,
+		coverTop: 8, coverBottom: 28,
+		metaLeft: 36, metaRight: 84,
+		metaTop: 29, metaBottom: 35,
+	}
+	bgFn := func(int) string { return "#0a0a0f" }
+
+	pts0 := computeZenStarfieldPoints(width, height, 15, 42, true, "#1db954", excl, bgFn)
+	if len(pts0) < 6 {
+		t.Fatalf("expected stratified starfield to generate at least 6 visible stars on 120x40, got %d", len(pts0))
+	}
+
+	for _, p := range pts0 {
+		if p.x < 0 || p.x >= width || p.y < 0 || p.y >= height {
+			t.Fatalf("star out of bounds: (%d, %d)", p.x, p.y)
+		}
+		if excl.contains(p.x, p.y) {
+			t.Fatalf("star spawned inside central UI exclusion zone: (%d, %d)", p.x, p.y)
+		}
+		if p.char != '·' && p.char != '✧' && p.char != '✦' {
+			t.Fatalf("unexpected star glyph %q (stars must keep fixed geometry without circles)", p.char)
+		}
+		if p.color == "" {
+			t.Fatalf("star missing color: %+v", p)
+		}
+	}
+
+	// Verify geometric invariance: across adjacent frames, stars at the same coordinate
+	// never morph their glyph/size, only their luminous intensity (color).
+	ptsNext := computeZenStarfieldPoints(width, height, 17, 42, true, "#1db954", excl, bgFn)
+	glyphAt0 := make(map[[2]int]rune, len(pts0))
+	for _, p := range pts0 {
+		glyphAt0[[2]int{p.x, p.y}] = p.char
+	}
+	for _, p := range ptsNext {
+		if prevChar, ok := glyphAt0[[2]int{p.x, p.y}]; ok && prevChar != p.char {
+			t.Fatalf("star at (%d,%d) changed glyph from %q to %q", p.x, p.y, prevChar, p.char)
+		}
+	}
+
+	// Verify that advancing to a new lifecycle or seed relocates stars organically
+	ptsLater := computeZenStarfieldPoints(width, height, 240, 42, true, "#1db954", excl, bgFn)
+	coords0 := make(map[[2]int]bool, len(pts0))
+	for _, p := range pts0 {
+		coords0[[2]int{p.x, p.y}] = true
+	}
+	relocated := 0
+	for _, p := range ptsLater {
+		if !coords0[[2]int{p.x, p.y}] {
+			relocated++
+		}
+	}
+	if relocated == 0 {
+		t.Errorf("expected stars to relocate to new coordinates across lifecycle cycles")
+	}
 }
 
 func TestRenderBlurredCoverLines(t *testing.T) {
